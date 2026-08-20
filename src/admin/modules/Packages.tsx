@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Plus, Edit3, Copy, Archive, Search, Package } from "lucide-react";
+import { Plus, Edit3, Copy, Archive, Search, Package, Trash2, ArrowUp, ArrowDown } from "lucide-react";
 import { store, useStore } from "../store";
 import { Button, Card, Input, Textarea, Select, Badge, Modal, ConfirmDialog, PageHeader, EmptyState, Tabs } from "../ui";
 import type { SafariPackage } from "../types";
@@ -50,6 +50,48 @@ function PackageCard({ pkg, onEdit, onDuplicate, onDelete, onTogglePublish }: {
   );
 }
 
+function ListEditor({ label, value, onChange }: { label: string; value: string[]; onChange: (items: string[]) => void }) {
+  const updateItem = (index: number, newValue: string) => {
+    const trimmed = newValue.trim();
+    if (!trimmed) {
+      onChange(value.filter((_, i) => i !== index));
+    } else {
+      const next = [...value];
+      next[index] = trimmed;
+      onChange(next);
+    }
+  };
+  const deleteItem = (index: number) => onChange(value.filter((_, i) => i !== index));
+  const moveItem = (index: number, direction: -1 | 1) => {
+    const next = [...value];
+    const newIndex = index + direction;
+    if (newIndex < 0 || newIndex >= next.length) return;
+    [next[index], next[newIndex]] = [next[newIndex], next[index]];
+    onChange(next);
+  };
+  return (
+    <div>
+      <h4 className="mb-3 font-serif text-lg font-light text-[var(--admin-fg)]">{label}</h4>
+      <div className="space-y-2">
+        {value.map((item, index) => (
+          <div key={index} className="flex gap-2 items-start">
+            <Input
+              value={item}
+              onChange={(e) => updateItem(index, e.target.value)}
+              placeholder="Enter item..."
+              className="flex-1"
+            />
+            <Button variant="outline" size="sm" onClick={() => deleteItem(index)} aria-label="Delete item" icon={Trash2} />
+            <Button variant="outline" size="sm" onClick={() => moveItem(index, -1)} disabled={index === 0} aria-label="Move up" icon={ArrowUp} />
+            <Button variant="outline" size="sm" onClick={() => moveItem(index, 1)} disabled={index === value.length - 1} aria-label="Move down" icon={ArrowDown} />
+          </div>
+        ))}
+      </div>
+      <Button variant="outline" size="sm" onClick={() => onChange([...value, ""])} icon={Plus} className="mt-2">Add item</Button>
+    </div>
+  );
+}
+
 function PackageEditor({ pkg, onClose }: { pkg: SafariPackage | null; onClose: () => void }) {
   const [form, setForm] = useState<Partial<SafariPackage>>(pkg ?? {
     title: "",
@@ -84,10 +126,26 @@ function PackageEditor({ pkg, onClose }: { pkg: SafariPackage | null; onClose: (
       store.notify({ type: "error", title: "Missing required fields", message: "Title and region are required." });
       return;
     }
+    const includedRaw = (form.included ?? []).map((i) => String(i));
+    const excludedRaw = (form.excluded ?? []).map((i) => String(i));
+    const allRaw = [...includedRaw, ...excludedRaw];
+    const maxLength = 200;
+    const hasEmpty = allRaw.some((item) => item.trim() === "");
+    const tooLong = allRaw.find((item) => item.trim().length > maxLength);
+    if (hasEmpty) {
+      store.notify({ type: "error", title: "Invalid list item", message: "Each item must be a non-empty string." });
+      return;
+    }
+    if (tooLong !== undefined) {
+      store.notify({ type: "error", title: "Invalid list item", message: `Each item must have a maximum length of ${maxLength} characters.` });
+      return;
+    }
+    const includedItems = includedRaw.map((i) => i.trim()).filter(Boolean);
+    const excludedItems = excludedRaw.map((i) => i.trim()).filter(Boolean);
     if (pkg) {
-      store.actions.updatePackage(pkg.id, form);
+      store.actions.updatePackage(pkg.id, { ...form, included: includedItems, excluded: excludedItems });
     } else {
-      store.actions.createPackage(form as Omit<SafariPackage, "id" | "createdAt" | "updatedAt" | "slug">);
+      store.actions.createPackage({ ...form, included: includedItems, excluded: excludedItems } as Omit<SafariPackage, "id" | "createdAt" | "updatedAt" | "slug">);
     }
     onClose();
   };
@@ -120,8 +178,8 @@ function PackageEditor({ pkg, onClose }: { pkg: SafariPackage | null; onClose: (
         <label className="block"><span className="mb-2 block text-[11px] font-medium uppercase tracking-wider text-[var(--admin-fg-muted)]">Gallery image URLs <small className="normal-case tracking-normal">(one per line)</small></span><Textarea rows={3} value={(form.gallery ?? []).join("\n")} onChange={(e) => update("gallery", e.target.value.split("\n").map((item) => item.trim()).filter(Boolean))} placeholder="https://..." /></label>
 
         <div className="grid gap-4 md:grid-cols-2">
-          <label className="block"><span className="mb-2 block text-[11px] font-medium uppercase tracking-wider text-[var(--admin-fg-muted)]">Included <small className="normal-case tracking-normal">(one per line)</small></span><Textarea rows={5} value={(form.included ?? []).join("\n")} onChange={(e) => update("included", e.target.value.split("\n").map((item) => item.trim()).filter(Boolean))} /></label>
-          <label className="block"><span className="mb-2 block text-[11px] font-medium uppercase tracking-wider text-[var(--admin-fg-muted)]">Not included <small className="normal-case tracking-normal">(one per line)</small></span><Textarea rows={5} value={(form.excluded ?? []).join("\n")} onChange={(e) => update("excluded", e.target.value.split("\n").map((item) => item.trim()).filter(Boolean))} /></label>
+          <div className="block"><ListEditor label="Included" value={form.included ?? []} onChange={(items) => update("included", items)} /></div>
+          <div className="block"><ListEditor label="Not included" value={form.excluded ?? []} onChange={(items) => update("excluded", items)} /></div>
         </div>
 
         <label className="block"><span className="mb-2 block text-[11px] font-medium uppercase tracking-wider text-[var(--admin-fg-muted)]">Availability months</span><Input value={(form.availability ?? []).join(", ")} onChange={(e) => update("availability", e.target.value.split(",").map((item) => item.trim()).filter(Boolean))} placeholder="Jun, Jul, Aug, Sep, Oct" /></label>
