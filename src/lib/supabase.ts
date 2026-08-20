@@ -94,7 +94,28 @@ function buildClient(): SupabaseClient | null {
   }
 }
 
+function buildPublicClient(): SupabaseClient | null {
+  if (supabaseConfigDiagnostics.missing.length > 0 || supabaseConfigDiagnostics.invalid.length > 0) {
+    return null;
+  }
+  try {
+    return createClient(supabaseUrl as string, supabaseKey as string, {
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false,
+        detectSessionInUrl: false,
+      },
+    });
+  } catch (error) {
+    if (import.meta.env.DEV) {
+      console.error("[Olkinyei] Failed to create the public Supabase client:", error instanceof Error ? error.message : error);
+    }
+    return null;
+  }
+}
+
 export const supabase = buildClient();
+export const supabasePublic = buildPublicClient();
 export const hasCloudBackend = Boolean(supabase);
 
 // Accurate, deploy-actionable reason string when cloud auth is unavailable.
