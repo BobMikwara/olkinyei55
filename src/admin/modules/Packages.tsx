@@ -115,6 +115,17 @@ function PackageEditor({ pkg, onClose }: { pkg: SafariPackage | null; onClose: (
 
         <label className="block"><span className="mb-2 block text-[11px] font-medium uppercase tracking-wider text-[var(--admin-fg-muted)]">Full Description</span><Textarea rows={6} value={form.description} onChange={(e) => update("description", e.target.value)} placeholder="Detailed description..." /></label>
 
+        <label className="block"><span className="mb-2 block text-[11px] font-medium uppercase tracking-wider text-[var(--admin-fg-muted)]">Signature moments</span><Input value={form.signature} onChange={(e) => update("signature", e.target.value)} placeholder="River crossings, predator country..." /></label>
+
+        <label className="block"><span className="mb-2 block text-[11px] font-medium uppercase tracking-wider text-[var(--admin-fg-muted)]">Gallery image URLs <small className="normal-case tracking-normal">(one per line)</small></span><Textarea rows={3} value={(form.gallery ?? []).join("\n")} onChange={(e) => update("gallery", e.target.value.split("\n").map((item) => item.trim()).filter(Boolean))} placeholder="https://..." /></label>
+
+        <div className="grid gap-4 md:grid-cols-2">
+          <label className="block"><span className="mb-2 block text-[11px] font-medium uppercase tracking-wider text-[var(--admin-fg-muted)]">Included <small className="normal-case tracking-normal">(one per line)</small></span><Textarea rows={5} value={(form.included ?? []).join("\n")} onChange={(e) => update("included", e.target.value.split("\n").map((item) => item.trim()).filter(Boolean))} /></label>
+          <label className="block"><span className="mb-2 block text-[11px] font-medium uppercase tracking-wider text-[var(--admin-fg-muted)]">Not included <small className="normal-case tracking-normal">(one per line)</small></span><Textarea rows={5} value={(form.excluded ?? []).join("\n")} onChange={(e) => update("excluded", e.target.value.split("\n").map((item) => item.trim()).filter(Boolean))} /></label>
+        </div>
+
+        <label className="block"><span className="mb-2 block text-[11px] font-medium uppercase tracking-wider text-[var(--admin-fg-muted)]">Availability months</span><Input value={(form.availability ?? []).join(", ")} onChange={(e) => update("availability", e.target.value.split(",").map((item) => item.trim()).filter(Boolean))} placeholder="Jun, Jul, Aug, Sep, Oct" /></label>
+
         <div className="border-t border-[var(--admin-border)] pt-6">
           <h3 className="mb-4 font-serif text-xl font-light">Publishing</h3>
           <div className="flex items-center gap-6">

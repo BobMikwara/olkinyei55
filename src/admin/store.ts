@@ -857,7 +857,32 @@ type DbPackageRow = {
   updated_at: string;
 };
 
+/** Coerce jsonb / text[] / newline strings into a string array. */
+function asStringArray(value: unknown): string[] {
+  if (Array.isArray(value)) return value.map((item) => String(item).trim()).filter(Boolean);
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return [];
+    try {
+      const parsed = JSON.parse(trimmed) as unknown;
+      if (Array.isArray(parsed)) return parsed.map((item) => String(item).trim()).filter(Boolean);
+    } catch { /* treat as a delimited list */ }
+    return trimmed.split(/\n|,/).map((item) => item.trim()).filter(Boolean);
+  }
+  return [];
+}
+
+function packagePriceFromRow(row: DbPackageRow & Record<string, unknown>): number {
+  const raw = row.price_usd ?? row.price ?? 0;
+  const amount = Number(raw);
+  return Number.isFinite(amount) ? amount : 0;
+}
+
 function packageFromRow(row: DbPackageRow): SafariPackage {
+  const rec = row as DbPackageRow & Record<string, unknown>;
+  const image = String(row.hero_image ?? rec.image ?? "");
+  const gallery = asStringArray(row.gallery);
+  const createdAt = row.created_at ?? row.updated_at ?? new Date().toISOString();
   return {
     id: row.id,
     slug: row.slug,
@@ -865,30 +890,30 @@ function packageFromRow(row: DbPackageRow): SafariPackage {
     region: row.region,
     duration: row.duration,
     nights: row.nights ?? 0,
-    price: Number(row.price_usd) || 0,
+    price: packagePriceFromRow(rec),
     discount: row.discount ?? undefined,
-    image: row.hero_image ?? "",
-    gallery: row.gallery ?? [],
+    image,
+    gallery: gallery.length > 0 ? gallery : (image ? [image] : []),
     summary: row.summary ?? "",
     description: row.description ?? "",
     signature: row.signature ?? "",
-    highlights: row.highlights ?? [],
-    included: row.included ?? [],
-    excluded: row.excluded ?? [],
-    availability: row.availability ?? [],
-    country: (row.country ?? []) as SafariPackage["country"],
-    parks: row.parks ?? [],
-    wildlife: row.wildlife ?? [],
+    highlights: asStringArray(row.highlights),
+    included: asStringArray(row.included),
+    excluded: asStringArray(row.excluded),
+    availability: asStringArray(row.availability),
+    country: asStringArray(row.country) as SafariPackage["country"],
+    parks: asStringArray(row.parks),
+    wildlife: asStringArray(row.wildlife),
     difficulty: row.difficulty ?? "Moderate",
-    tags: row.tags ?? [],
+    tags: asStringArray(row.tags),
     featured: Boolean(row.featured),
     published: Boolean(row.published),
     archived: Boolean(row.archived),
     coordinates: row.coordinates ?? [0, 0],
     seo: { title: row.seo_title ?? row.title, description: row.seo_description ?? row.summary ?? "" },
     publishDate: row.publish_date ?? undefined,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at ?? row.created_at,
+    createdAt,
+    updatedAt: row.updated_at ?? createdAt,
   };
 }
 
@@ -917,13 +942,35 @@ function packageToRow(pkg: SafariPackage): Record<string, unknown> {
     difficulty: pkg.difficulty,
     tags: pkg.tags,
     featured: pkg.featured,
-    published: pkg.published,
+    published: Boolean(pkg.published),
     archived: Boolean(pkg.archived),
     coordinates: pkg.coordinates,
     seo_title: pkg.seo.title,
     seo_description: pkg.seo.description,
     publish_date: pkg.publishDate ?? null,
   };
+}
+
+/** Columns that exist on the original `schema.sql` packages table. */
+function corePackageRow(pkg: SafariPackage): Record<string, unknown> {
+  return {
+    slug: pkg.slug,
+    title: pkg.title,
+    region: pkg.region,
+    duration: pkg.duration,
+    price_usd: pkg.price,
+    summary: pkg.summary || pkg.description || "",
+    hero_image: pkg.image || "",
+    included: pkg.included ?? [],
+    excluded: pkg.excluded ?? [],
+    published: Boolean(pkg.published),
+  };
+}
+
+function isMissingColumnError(message: string): boolean {
+  return /could not find the '[^']+' column/i.test(message)
+    || /schema cache/i.test(message)
+    || /column .+ does not exist/i.test(message);
 }
 
 let packagesBootstrapped = false;
@@ -934,7 +981,11 @@ async function loadCloudPackages(options: { force?: boolean } = {}): Promise<voi
   if (!client || (packagesBootstrapped && !options.force)) return;
   packagesBootstrapped = true;
   try {
-    const { data, error } = await client.from("packages").select("*").order("created_at", { ascending: false });
+    let query = client.from("packages").select("*");
+    let { data, error } = await query.order("created_at", { ascending: false });
+    if (error && isMissingColumnError(error.message)) {
+      ({ data, error } = await client.from("packages").select("*").order("updated_at", { ascending: false }));
+    }
     if (error) throw new Error(error.message);
     if (!data || data.length === 0) return;
     state = { ...state, packages: (data as DbPackageRow[]).map(packageFromRow) };
@@ -955,9 +1006,14 @@ async function loadPublicPackages(options: { force?: boolean; requireSuccess?: b
   if (!client || (publicPackagesBootstrapped && !options.force)) return;
   publicPackagesBootstrapped = true;
   try {
-    const { data, error } = await client.from("packages").select("*").order("created_at", { ascending: false });
+    let { data, error } = await client.from("packages").select("*").order("created_at", { ascending: false });
+    if (error && isMissingColumnError(error.message)) {
+      ({ data, error } = await client.from("packages").select("*").order("updated_at", { ascending: false }));
+    }
     if (error) throw new Error(error.message);
-    state = { ...state, publicPackages: (data as DbPackageRow[] | null)?.map(packageFromRow) ?? seedPackages };
+    // Never fall back to the bundled seed here: that seed is what made CMS
+    // price/title edits look like they never reached the public website.
+    state = { ...state, publicPackages: (data as DbPackageRow[] | null)?.map(packageFromRow) ?? [] };
     emit();
   } catch (error) {
     publicPackagesBootstrapped = false;
@@ -1000,6 +1056,32 @@ function applyPublicPackageRealtime(action: "INSERT" | "UPDATE" | "DELETE", row:
   emit();
 }
 
+async function upsertPackageRow(pkg: SafariPackage): Promise<string> {
+  const client = supabase;
+  if (!client) throw new Error("Cloud database is not configured.");
+
+  const write = async (row: Record<string, unknown>, onConflict: "id" | "slug") => {
+    const { data, error } = await client.from("packages").upsert(row, { onConflict }).select("id").single();
+    if (error) throw new Error(error.message);
+    return (data as { id: string }).id;
+  };
+
+  const isUuid = UUID_PATTERN.test(pkg.id);
+  const full = packageToRow(pkg);
+  try {
+    if (isUuid) return await write(full, "id");
+    const { id: _seedId, ...withoutId } = full;
+    return await write(withoutId, "slug");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!isMissingColumnError(message)) throw error;
+    // Production may still be on the original schema.sql packages table.
+    const core = corePackageRow(pkg);
+    if (isUuid) return await write({ ...core, id: pkg.id }, "id");
+    return await write(core, "slug");
+  }
+}
+
 /** Persists a package to the database. Errors surface, never swallowed. */
 function packageCloudSave(pkg: SafariPackage | null, deletedId?: string): void {
   const client = supabase;
@@ -1010,28 +1092,17 @@ function packageCloudSave(pkg: SafariPackage | null, deletedId?: string): void {
         if (!UUID_PATTERN.test(deletedId)) return;
         const { error } = await client.from("packages").delete().eq("id", deletedId);
         if (error) throw error;
+        publicPackagesBootstrapped = false;
         await loadPublicPackages({ force: true, requireSuccess: true });
         return;
       }
       if (!pkg) return;
-      const row = packageToRow(pkg);
-      if (UUID_PATTERN.test(pkg.id)) {
-        const { error } = await client.from("packages").upsert(row, { onConflict: "id" }).select("id").single();
-        if (error) throw error;
-        await loadPublicPackages({ force: true, requireSuccess: true });
-        return;
+      const cloudId = await upsertPackageRow(pkg);
+      if (cloudId !== pkg.id) {
+        state = { ...state, packages: state.packages.map((p) => (p.id === pkg.id ? { ...p, id: cloudId } : p)) };
+        emit();
       }
-      // Seed ids ("p1") are not uuids: let Postgres mint one, keyed by slug.
-      const { id: _seedId, ...withoutId } = row;
-      const { data, error } = await client
-        .from("packages")
-        .upsert(withoutId, { onConflict: "slug" })
-        .select("id")
-        .single();
-      if (error) throw error;
-      const cloudId = (data as { id: string }).id;
-      state = { ...state, packages: state.packages.map((p) => (p.id === pkg.id ? { ...p, id: cloudId } : p)) };
-      emit();
+      publicPackagesBootstrapped = false;
       await loadPublicPackages({ force: true, requireSuccess: true });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -1116,10 +1187,13 @@ async function loadCloudTestimonials(options: { force?: boolean } = {}): Promise
   if (!client || (testimonialsBootstrapped && !options.force)) return;
   testimonialsBootstrapped = true;
   try {
-    const { data, error } = await client
+    let { data, error } = await client
       .from(TABLES.testimonials)
       .select("*")
       .order("created_at", { ascending: false });
+    if (error && isMissingColumnError(error.message)) {
+      ({ data, error } = await client.from(TABLES.testimonials).select("*").order("sort_order", { ascending: true }));
+    }
     if (error) throw new Error(error.message);
     state = { ...state, testimonials: (data as DbTestimonialRow[]).map(testimonialFromRow) };
     emit();
@@ -1947,7 +2021,7 @@ const actions = {
     const rating = input.rating && input.rating >= 1 && input.rating <= 5 ? Math.round(input.rating) : null;
 
     try {
-      const { error } = await client.from(TABLES.testimonials).insert({
+      const full = {
         guest_name: guestName,
         quote,
         guest_email: input.guestEmail?.trim().toLowerCase() || null,
@@ -1961,7 +2035,16 @@ const actions = {
         flagged: false,
         source: "website",
         external_review_id: null,
-      });
+      };
+      let { error } = await client.from(TABLES.testimonials).insert(full);
+      if (error && isMissingColumnError(error.message)) {
+        ({ error } = await client.from(TABLES.testimonials).insert({
+          guest_name: guestName,
+          quote,
+          guest_location: input.guestLocation?.trim().slice(0, 120) || null,
+          published: false,
+        }));
+      }
       if (error) throw new Error(error.message);
       return { ok: true };
     } catch (error) {
@@ -2037,16 +2120,17 @@ const actions = {
     emit();
 
     if (supabase) {
-      const { error } = await supabase
-        .from(TABLES.testimonials)
-        .update({ status, flagged: status === "flagged", moderated_by: actor.id, moderated_at: new Date().toISOString() })
-        .eq("id", id)
-        .select("id")
-        .single();
+      const published = status === "approved";
+      const payload = { status, published, flagged: status === "flagged", moderated_by: actor.id, moderated_at: new Date().toISOString() };
+      let { error } = await supabase.from(TABLES.testimonials).update(payload).eq("id", id).select("id").single();
+      if (error && isMissingColumnError(error.message)) {
+        ({ error } = await supabase.from(TABLES.testimonials).update({ published }).eq("id", id).select("id").single());
+      }
       if (error) {
         notify({ type: "error", title: "Moderation failed", message: error.message });
         return;
       }
+      publicTestimonialsBootstrapped = false;
       await loadPublicTestimonials({ force: true, requireSuccess: true });
     }
     audit(`testimonial.${status}`, "testimonial", "success", { actorId: actor.id, actorEmail: actor.email, targetId: id });
