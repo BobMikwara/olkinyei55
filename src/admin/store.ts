@@ -9,7 +9,7 @@ import type {
   PageSettings, PermissionSet, Role, SafariPackage, Session,
   SiteSettings, Testimonial, TestimonialStatus, Theme, Vehicle,
 } from "./types";
-import { cloudUnavailableReason, supabase } from "../lib/supabase";
+import { cloudUnavailableReason, supabase, supabasePublic } from "../lib/supabase";
 import { LEGACY_ROLE_ALIASES, TABLES } from "./constants";
 import {
   authChangePassword,
@@ -171,15 +171,20 @@ type StoreState = {
   bookings: Booking[];
   newBookingsCount: number;
   packages: SafariPackage[];
+  publicPackages: SafariPackage[];
   destinations: Destination[];
   media: MediaAsset[];
   blogPosts: BlogPost[];
+  publicBlogPosts: BlogPost[];
   testimonials: Testimonial[];
+  publicTestimonials: Testimonial[];
   guides: Guide[];
   vehicles: Vehicle[];
   customers: Customer[];
   pages: PageSettings[];
+  publicPages: PageSettings[];
   siteSettings: SiteSettings;
+  publicSiteSettings: SiteSettings;
   activity: ActivityEntry[];
   audit: AuditEntry[];
   notifications: Notification[];
@@ -203,15 +208,20 @@ function loadState(): StoreState {
         bookings: saved.bookings ?? seedBookings,
         newBookingsCount: saved.newBookingsCount ?? 0,
         packages: saved.packages ?? seedPackages,
+        publicPackages: seedPackages,
         destinations: saved.destinations ?? seedDestinations,
         media: saved.media ?? seedMedia,
         blogPosts: saved.blogPosts ?? seedBlogPosts,
+        publicBlogPosts: seedBlogPosts,
         testimonials: saved.testimonials ?? [],
+        publicTestimonials: [],
         guides: saved.guides ?? seedGuides,
         vehicles: saved.vehicles ?? seedVehicles,
         customers: saved.customers ?? seedCustomers,
         pages: saved.pages ?? seedPages,
+        publicPages: seedPages,
         siteSettings: { ...seedSiteSettings, ...(saved.siteSettings ?? {}) },
+        publicSiteSettings: seedSiteSettings,
         activity: saved.activity ?? seedActivity,
         audit: saved.audit ?? [],
         notifications: [],
@@ -226,15 +236,20 @@ function loadState(): StoreState {
     bookings: seedBookings,
     newBookingsCount: 0,
     packages: seedPackages,
+    publicPackages: seedPackages,
     destinations: seedDestinations,
     media: seedMedia,
     blogPosts: seedBlogPosts,
+    publicBlogPosts: seedBlogPosts,
     testimonials: [],
+    publicTestimonials: [],
     guides: seedGuides,
     vehicles: seedVehicles,
     customers: seedCustomers,
     pages: seedPages,
+    publicPages: seedPages,
     siteSettings: seedSiteSettings,
+    publicSiteSettings: seedSiteSettings,
     activity: seedActivity,
     audit: [],
     notifications: [],
@@ -380,7 +395,17 @@ function subscribeToBookingsAuthenticated(onRow: (booking: import("../data").Boo
 window.addEventListener("storage", (event) => {
   if (event.key === STORAGE_KEY && event.newValue) {
     try {
-      state = JSON.parse(event.newValue) as StoreState;
+      const saved = JSON.parse(event.newValue) as Partial<StoreState>;
+      state = {
+        ...loadState(),
+        ...saved,
+        publicPackages: state.publicPackages,
+        publicBlogPosts: state.publicBlogPosts,
+        publicTestimonials: state.publicTestimonials,
+        publicPages: state.publicPages,
+        publicSiteSettings: state.publicSiteSettings,
+        notifications: state.notifications,
+      };
       listeners.forEach((listener) => listener());
     } catch { /* Ignore invalid external state. */ }
     return;
@@ -392,8 +417,21 @@ window.addEventListener("storage", (event) => {
   }
 });
 
+function persistedStateSnapshot(current: StoreState): Omit<StoreState, "publicPackages" | "publicBlogPosts" | "publicTestimonials" | "publicPages" | "publicSiteSettings" | "notifications"> {
+  const {
+    publicPackages: _publicPackages,
+    publicBlogPosts: _publicBlogPosts,
+    publicTestimonials: _publicTestimonials,
+    publicPages: _publicPages,
+    publicSiteSettings: _publicSiteSettings,
+    notifications: _notifications,
+    ...persisted
+  } = current;
+  return persisted;
+}
+
 function persist() {
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(persistedStateSnapshot(state))); }
   catch { /* ignore quota errors */ }
 }
 
@@ -404,9 +442,13 @@ function emit() {
 
 // ============ Cloud content sync (Supabase cms_content) ============
 // Brand, page, and site settings live in the database so changes publish to
-// every device in real time. localStorage remains an offline cache only.
+// every device in real time. The public website reads with an ANONYMOUS client
+// so a signed-in CMS session can never mask a broken public query path.
 
 let cmsContentBootstrapped = false;
+let publicCmsContentBootstrapped = false;
+
+type CmsContentRow = { id: string; content: unknown };
 
 function applyCloudSiteSettings(content: unknown) {
   if (!content || typeof content !== "object" || Array.isArray(content)) return;
@@ -416,27 +458,66 @@ function applyCloudSiteSettings(content: unknown) {
   emit();
 }
 
+function applyPublicCloudSiteSettings(content: unknown) {
+  if (!content || typeof content !== "object" || Array.isArray(content)) return;
+  const incoming = content as Partial<SiteSettings>;
+  if (Object.keys(incoming).length === 0) return;
+  state = { ...state, publicSiteSettings: { ...seedSiteSettings, ...incoming } };
+  emit();
+}
+
 function applyCloudPages(content: unknown) {
   if (!Array.isArray(content) || content.length === 0) return;
   state = { ...state, pages: content as PageSettings[] };
   emit();
 }
 
-async function loadCloudCmsContent(): Promise<void> {
-  if (!supabase || cmsContentBootstrapped) return;
+function applyPublicCloudPages(content: unknown) {
+  if (!Array.isArray(content) || content.length === 0) return;
+  state = { ...state, publicPages: content as PageSettings[] };
+  emit();
+}
+
+async function loadCloudCmsContent(options: { force?: boolean } = {}): Promise<void> {
+  if (!supabase || (cmsContentBootstrapped && !options.force)) return;
   cmsContentBootstrapped = true;
   try {
-    // First, maybe seed the cloud once from local defaults so the first user
-    // migration doesn't discard anything.
-    const { data } = await supabase.from(TABLES.cmsContent).select("id, content");
-    const rows = (data ?? []) as { id: string; content: unknown }[];
+    const { data, error } = await supabase.from(TABLES.cmsContent).select("id, content");
+    if (error) throw error;
+    const rows = (data ?? []) as CmsContentRow[];
     for (const row of rows) {
       if (row.id === "site_settings") applyCloudSiteSettings(row.content);
       if (row.id === "pages") applyCloudPages(row.content);
     }
-    if (import.meta.env.DEV) console.debug("[Olkinyei] CMS content synced from Supabase");
+    if (import.meta.env.DEV) console.debug("[Olkinyei] CMS content synced from Supabase (staff)");
   } catch {
     cmsContentBootstrapped = false; // allow retry on next focus/save
+  }
+}
+
+async function loadPublicCmsContent(options: { force?: boolean; requireSuccess?: boolean } = {}): Promise<void> {
+  if (!supabasePublic || (publicCmsContentBootstrapped && !options.force)) return;
+  publicCmsContentBootstrapped = true;
+  try {
+    const { data, error } = await supabasePublic.from(TABLES.cmsContent).select("id, content");
+    if (error) throw error;
+    const rows = (data ?? []) as CmsContentRow[];
+    let nextSiteSettings = seedSiteSettings;
+    let nextPages = seedPages;
+    for (const row of rows) {
+      if (row.id === "site_settings" && row.content && typeof row.content === "object" && !Array.isArray(row.content)) {
+        nextSiteSettings = { ...seedSiteSettings, ...(row.content as Partial<SiteSettings>) };
+      }
+      if (row.id === "pages" && Array.isArray(row.content) && row.content.length > 0) {
+        nextPages = row.content as PageSettings[];
+      }
+    }
+    state = { ...state, publicSiteSettings: nextSiteSettings, publicPages: nextPages };
+    emit();
+    if (import.meta.env.DEV) console.debug("[Olkinyei] CMS content synced from Supabase (public)");
+  } catch (error) {
+    publicCmsContentBootstrapped = false;
+    if (options.requireSuccess) throw error;
   }
 }
 
@@ -444,13 +525,19 @@ let cloudSaveQueue: Promise<void> = Promise.resolve();
 
 async function cloudSaveDocument(id: "site_settings" | "pages", content: unknown): Promise<void> {
   const client = supabase;
-  if (!client) { cmsContentBootstrapped = false; return; }
+  if (!client) {
+    cmsContentBootstrapped = false;
+    publicCmsContentBootstrapped = false;
+    return;
+  }
   cloudSaveQueue = cloudSaveQueue.then(async () => {
-    try {
-      await client.from(TABLES.cmsContent).upsert({ id, content, updated_at: new Date().toISOString() });
-    } catch (error) {
-      if (import.meta.env.DEV) console.warn("[Olkinyei] cloud save failed for", id, error);
-    }
+    const { error } = await client
+      .from(TABLES.cmsContent)
+      .upsert({ id, content, updated_at: new Date().toISOString() })
+      .select("id")
+      .single();
+    if (error) throw error;
+    await loadPublicCmsContent({ force: true, requireSuccess: true });
   });
   return cloudSaveQueue;
 }
@@ -538,15 +625,13 @@ function blogPostToRow(post: BlogPost): Omit<DbBlogRow, "created_at" | "updated_
 
 // Synced once when the cloud is available; realtime keeps it live afterwards.
 let blogBootstrapped = false;
+let publicBlogBootstrapped = false;
 
-async function loadCloudBlogPosts(): Promise<void> {
+async function loadCloudBlogPosts(options: { force?: boolean } = {}): Promise<void> {
   const client = supabase;
-  if (!client || blogBootstrapped) return;
+  if (!client || (blogBootstrapped && !options.force)) return;
   blogBootstrapped = true;
   try {
-    // Order by published_at: it exists on every schema version, whereas
-    // created_at was missing from the original blog_posts definition and an
-    // unknown ORDER BY column fails the entire request.
     const { data, error } = await client
       .from(TABLES.blogPosts)
       .select("*")
@@ -555,25 +640,42 @@ async function loadCloudBlogPosts(): Promise<void> {
     if (!data) throw new Error("No response from blog_posts");
 
     const posts = (data as DbBlogRow[]).map(blogPostFromRow);
-    // Cloud is authoritative for anything it returns. Anonymous visitors only
-    // receive published rows (RLS), which is exactly what the journal shows.
-    // Unsynced local drafts are preserved so CMS work is never lost.
     const localOnly = state.blogPosts.filter((existing) =>
       existing.status !== "published"
       && existing.status !== "archived"
       && !posts.some((cloud) => cloud.id === existing.id || cloud.slug === existing.slug));
     state = { ...state, blogPosts: [...posts, ...localOnly] };
     emit();
-    if (import.meta.env.DEV) console.debug(`[Olkinyei] Blog posts synced from Supabase: ${posts.length}`);
+    if (import.meta.env.DEV) console.debug(`[Olkinyei] Blog posts synced from Supabase (staff): ${posts.length}`);
   } catch (error) {
     blogBootstrapped = false;
     const message = error instanceof Error ? error.message : String(error);
-    // Surfaced loudly: an empty journal in production is almost always this.
     console.error(
       "[Olkinyei] Could not load blog posts from Supabase:",
       message,
       "\nRun supabase/blog_posts_sync.sql, then confirm anonymous SELECT is permitted on public.blog_posts.",
     );
+  }
+}
+
+async function loadPublicBlogPosts(options: { force?: boolean; requireSuccess?: boolean } = {}): Promise<void> {
+  const client = supabasePublic;
+  if (!client || (publicBlogBootstrapped && !options.force)) return;
+  publicBlogBootstrapped = true;
+  try {
+    const { data, error } = await client
+      .from(TABLES.blogPosts)
+      .select("*")
+      .order("published_at", { ascending: false, nullsFirst: false });
+    if (error) throw new Error(`${error.message}${error.hint ? ` — ${error.hint}` : ""}`);
+    state = { ...state, publicBlogPosts: (data as DbBlogRow[] | null)?.map(blogPostFromRow) ?? [] };
+    emit();
+  } catch (error) {
+    publicBlogBootstrapped = false;
+    if (options.requireSuccess) throw error;
+    if (import.meta.env.DEV) {
+      console.warn("[Olkinyei] Could not load public blog posts:", error instanceof Error ? error.message : error);
+    }
   }
 }
 
@@ -596,50 +698,112 @@ function applyBlogRealtimeRow(action: "INSERT" | "UPDATE" | "DELETE", row: unkno
   emit();
 }
 
-// Live updates: any save from any device lands here without a refresh.
-if (typeof window !== "undefined" && supabase) {
-  supabase
-    .channel("olkinyei-cms-content")
-    .on("postgres_changes", { event: "*", schema: "public", table: "cms_content" }, (payload) => {
-      const row = payload.new as { id?: string; content?: unknown };
-      if (row?.id === "site_settings") applyCloudSiteSettings(row.content);
-      if (row?.id === "pages") applyCloudPages(row.content);
-    })
-    .on("postgres_changes", { event: "INSERT", schema: "public", table: "blog_posts" }, (payload) => {
-      applyBlogRealtimeRow("INSERT", payload.new);
-    })
-    .on("postgres_changes", { event: "UPDATE", schema: "public", table: "blog_posts" }, (payload) => {
-      applyBlogRealtimeRow("UPDATE", payload.new);
-    })
-    .on("postgres_changes", { event: "DELETE", schema: "public", table: "blog_posts" }, (payload) => {
-      applyBlogRealtimeRow("DELETE", payload.old);
-    })
-    .on("postgres_changes", { event: "INSERT", schema: "public", table: "testimonials" }, (payload) => {
-      applyTestimonialRealtime("INSERT", payload.new);
-    })
-    .on("postgres_changes", { event: "UPDATE", schema: "public", table: "testimonials" }, (payload) => {
-      applyTestimonialRealtime("UPDATE", payload.new);
-    })
-    .on("postgres_changes", { event: "DELETE", schema: "public", table: "testimonials" }, (payload) => {
-      applyTestimonialRealtime("DELETE", payload.old);
-    })
-    .on("postgres_changes", { event: "INSERT", schema: "public", table: "packages" }, (payload) => {
-      applyPackageRealtime("INSERT", payload.new);
-    })
-    .on("postgres_changes", { event: "UPDATE", schema: "public", table: "packages" }, (payload) => {
-      applyPackageRealtime("UPDATE", payload.new);
-    })
-    .on("postgres_changes", { event: "DELETE", schema: "public", table: "packages" }, (payload) => {
-      applyPackageRealtime("DELETE", payload.old);
-    })
-    .subscribe();
+function applyPublicBlogRealtimeRow(action: "INSERT" | "UPDATE" | "DELETE", row: unknown) {
+  if (!row || typeof row !== "object") return;
+  const rec = row as DbBlogRow & { id: string };
+  if (action === "DELETE") {
+    const id = (rec as unknown as { id: string }).id;
+    if (!id) return;
+    state = { ...state, publicBlogPosts: state.publicBlogPosts.filter((p) => p.id !== id) };
+    emit();
+    return;
+  }
+  const next = blogPostFromRow(rec);
+  const exists = state.publicBlogPosts.some((p) => p.id === next.id);
+  state = {
+    ...state,
+    publicBlogPosts: exists ? state.publicBlogPosts.map((p) => (p.id === next.id ? next : p)) : [next, ...state.publicBlogPosts],
+  };
+  emit();
+}
 
-  // Boot the content. Public bundle shares this module, so visitors get
-  // fresh brand settings on first paint as well.
-  void loadCloudCmsContent();
-  void loadCloudBlogPosts();
-  void loadCloudTestimonials();
-  void loadCloudPackages();
+// Live updates: any save from any device lands here without a refresh.
+if (typeof window !== "undefined") {
+  if (supabase) {
+    supabase
+      .channel("olkinyei-cms-content")
+      .on("postgres_changes", { event: "*", schema: "public", table: "cms_content" }, (payload) => {
+        const row = payload.new as { id?: string; content?: unknown };
+        if (row?.id === "site_settings") applyCloudSiteSettings(row.content);
+        if (row?.id === "pages") applyCloudPages(row.content);
+      })
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "blog_posts" }, (payload) => {
+        applyBlogRealtimeRow("INSERT", payload.new);
+      })
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "blog_posts" }, (payload) => {
+        applyBlogRealtimeRow("UPDATE", payload.new);
+      })
+      .on("postgres_changes", { event: "DELETE", schema: "public", table: "blog_posts" }, (payload) => {
+        applyBlogRealtimeRow("DELETE", payload.old);
+      })
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "testimonials" }, (payload) => {
+        applyTestimonialRealtime("INSERT", payload.new);
+      })
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "testimonials" }, (payload) => {
+        applyTestimonialRealtime("UPDATE", payload.new);
+      })
+      .on("postgres_changes", { event: "DELETE", schema: "public", table: "testimonials" }, (payload) => {
+        applyTestimonialRealtime("DELETE", payload.old);
+      })
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "packages" }, (payload) => {
+        applyPackageRealtime("INSERT", payload.new);
+      })
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "packages" }, (payload) => {
+        applyPackageRealtime("UPDATE", payload.new);
+      })
+      .on("postgres_changes", { event: "DELETE", schema: "public", table: "packages" }, (payload) => {
+        applyPackageRealtime("DELETE", payload.old);
+      })
+      .subscribe();
+
+    void loadCloudCmsContent();
+    void loadCloudBlogPosts();
+    void loadCloudTestimonials();
+    void loadCloudPackages();
+  }
+
+  if (supabasePublic) {
+    supabasePublic
+      .channel("olkinyei-public-content")
+      .on("postgres_changes", { event: "*", schema: "public", table: "cms_content" }, (payload) => {
+        const row = payload.new as { id?: string; content?: unknown };
+        if (row?.id === "site_settings") applyPublicCloudSiteSettings(row.content);
+        if (row?.id === "pages") applyPublicCloudPages(row.content);
+      })
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "blog_posts" }, (payload) => {
+        applyPublicBlogRealtimeRow("INSERT", payload.new);
+      })
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "blog_posts" }, (payload) => {
+        applyPublicBlogRealtimeRow("UPDATE", payload.new);
+      })
+      .on("postgres_changes", { event: "DELETE", schema: "public", table: "blog_posts" }, (payload) => {
+        applyPublicBlogRealtimeRow("DELETE", payload.old);
+      })
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "testimonials" }, (payload) => {
+        applyPublicTestimonialRealtime("INSERT", payload.new);
+      })
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "testimonials" }, (payload) => {
+        applyPublicTestimonialRealtime("UPDATE", payload.new);
+      })
+      .on("postgres_changes", { event: "DELETE", schema: "public", table: "testimonials" }, (payload) => {
+        applyPublicTestimonialRealtime("DELETE", payload.old);
+      })
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "packages" }, (payload) => {
+        applyPublicPackageRealtime("INSERT", payload.new);
+      })
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "packages" }, (payload) => {
+        applyPublicPackageRealtime("UPDATE", payload.new);
+      })
+      .on("postgres_changes", { event: "DELETE", schema: "public", table: "packages" }, (payload) => {
+        applyPublicPackageRealtime("DELETE", payload.old);
+      })
+      .subscribe();
+
+    void loadPublicCmsContent();
+    void loadPublicBlogPosts();
+    void loadPublicTestimonials();
+    void loadPublicPackages();
+  }
 }
 
 export function newBlogId(): string {
@@ -763,18 +927,19 @@ function packageToRow(pkg: SafariPackage): Record<string, unknown> {
 }
 
 let packagesBootstrapped = false;
+let publicPackagesBootstrapped = false;
 
-async function loadCloudPackages(): Promise<void> {
+async function loadCloudPackages(options: { force?: boolean } = {}): Promise<void> {
   const client = supabase;
-  if (!client || packagesBootstrapped) return;
+  if (!client || (packagesBootstrapped && !options.force)) return;
   packagesBootstrapped = true;
   try {
     const { data, error } = await client.from("packages").select("*").order("created_at", { ascending: false });
     if (error) throw new Error(error.message);
-    if (!data || data.length === 0) return; // keep seed content until the table is populated
+    if (!data || data.length === 0) return;
     state = { ...state, packages: (data as DbPackageRow[]).map(packageFromRow) };
     emit();
-    if (import.meta.env.DEV) console.debug(`[Olkinyei] Packages synced: ${data.length}`);
+    if (import.meta.env.DEV) console.debug(`[Olkinyei] Packages synced (staff): ${data.length}`);
   } catch (error) {
     packagesBootstrapped = false;
     console.error(
@@ -782,6 +947,22 @@ async function loadCloudPackages(): Promise<void> {
       error instanceof Error ? error.message : error,
       "\nRun supabase/packages_sync.sql, then confirm anonymous SELECT is permitted on public.packages.",
     );
+  }
+}
+
+async function loadPublicPackages(options: { force?: boolean; requireSuccess?: boolean } = {}): Promise<void> {
+  const client = supabasePublic;
+  if (!client || (publicPackagesBootstrapped && !options.force)) return;
+  publicPackagesBootstrapped = true;
+  try {
+    const { data, error } = await client.from("packages").select("*").order("created_at", { ascending: false });
+    if (error) throw new Error(error.message);
+    state = { ...state, publicPackages: (data as DbPackageRow[] | null)?.map(packageFromRow) ?? seedPackages };
+    emit();
+  } catch (error) {
+    publicPackagesBootstrapped = false;
+    if (options.requireSuccess) throw error;
+    if (import.meta.env.DEV) console.warn("[Olkinyei] Could not load public safari packages:", error instanceof Error ? error.message : error);
   }
 }
 
@@ -802,6 +983,23 @@ function applyPackageRealtime(action: "INSERT" | "UPDATE" | "DELETE", row: unkno
   emit();
 }
 
+function applyPublicPackageRealtime(action: "INSERT" | "UPDATE" | "DELETE", row: unknown) {
+  if (!row || typeof row !== "object") return;
+  const rec = row as DbPackageRow;
+  if (action === "DELETE") {
+    state = { ...state, publicPackages: state.publicPackages.filter((p) => p.id !== rec.id) };
+    emit();
+    return;
+  }
+  const next = packageFromRow(rec);
+  const exists = state.publicPackages.some((p) => p.id === next.id);
+  state = {
+    ...state,
+    publicPackages: exists ? state.publicPackages.map((p) => (p.id === next.id ? next : p)) : [next, ...state.publicPackages],
+  };
+  emit();
+}
+
 /** Persists a package to the database. Errors surface, never swallowed. */
 function packageCloudSave(pkg: SafariPackage | null, deletedId?: string): void {
   const client = supabase;
@@ -812,13 +1010,15 @@ function packageCloudSave(pkg: SafariPackage | null, deletedId?: string): void {
         if (!UUID_PATTERN.test(deletedId)) return;
         const { error } = await client.from("packages").delete().eq("id", deletedId);
         if (error) throw error;
+        await loadPublicPackages({ force: true, requireSuccess: true });
         return;
       }
       if (!pkg) return;
       const row = packageToRow(pkg);
       if (UUID_PATTERN.test(pkg.id)) {
-        const { error } = await client.from("packages").upsert(row, { onConflict: "id" });
+        const { error } = await client.from("packages").upsert(row, { onConflict: "id" }).select("id").single();
         if (error) throw error;
+        await loadPublicPackages({ force: true, requireSuccess: true });
         return;
       }
       // Seed ids ("p1") are not uuids: let Postgres mint one, keyed by slug.
@@ -832,13 +1032,14 @@ function packageCloudSave(pkg: SafariPackage | null, deletedId?: string): void {
       const cloudId = (data as { id: string }).id;
       state = { ...state, packages: state.packages.map((p) => (p.id === pkg.id ? { ...p, id: cloudId } : p)) };
       emit();
+      await loadPublicPackages({ force: true, requireSuccess: true });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (import.meta.env.DEV) console.error("[Olkinyei] package cloud write failed:", message);
       notify({
         type: "error",
         title: "Not published to the website",
-        message: `Saved locally, but Supabase rejected it: ${message.slice(0, 140)}`,
+        message: `Supabase rejected the change: ${message.slice(0, 140)}`,
         duration: 9000,
       });
     }
@@ -907,11 +1108,12 @@ function testimonialFromRow(row: DbTestimonialRow): Testimonial {
 }
 
 let testimonialsBootstrapped = false;
+let publicTestimonialsBootstrapped = false;
 
 /** Loads testimonials. RLS returns approved-only for visitors, all for staff. */
-async function loadCloudTestimonials(): Promise<void> {
+async function loadCloudTestimonials(options: { force?: boolean } = {}): Promise<void> {
   const client = supabase;
-  if (!client || testimonialsBootstrapped) return;
+  if (!client || (testimonialsBootstrapped && !options.force)) return;
   testimonialsBootstrapped = true;
   try {
     const { data, error } = await client
@@ -924,6 +1126,25 @@ async function loadCloudTestimonials(): Promise<void> {
   } catch (error) {
     testimonialsBootstrapped = false;
     if (import.meta.env.DEV) console.warn("[Olkinyei] Could not load testimonials:", error);
+  }
+}
+
+async function loadPublicTestimonials(options: { force?: boolean; requireSuccess?: boolean } = {}): Promise<void> {
+  const client = supabasePublic;
+  if (!client || (publicTestimonialsBootstrapped && !options.force)) return;
+  publicTestimonialsBootstrapped = true;
+  try {
+    const { data, error } = await client
+      .from(TABLES.testimonials)
+      .select("*")
+      .order("created_at", { ascending: false });
+    if (error) throw new Error(error.message);
+    state = { ...state, publicTestimonials: (data as DbTestimonialRow[] | null)?.map(testimonialFromRow) ?? [] };
+    emit();
+  } catch (error) {
+    publicTestimonialsBootstrapped = false;
+    if (options.requireSuccess) throw error;
+    if (import.meta.env.DEV) console.warn("[Olkinyei] Could not load public testimonials:", error);
   }
 }
 
@@ -946,6 +1167,25 @@ function applyTestimonialRealtime(action: "INSERT" | "UPDATE" | "DELETE", row: u
   emit();
 }
 
+function applyPublicTestimonialRealtime(action: "INSERT" | "UPDATE" | "DELETE", row: unknown) {
+  if (!row || typeof row !== "object") return;
+  const rec = row as DbTestimonialRow;
+  if (action === "DELETE") {
+    state = { ...state, publicTestimonials: state.publicTestimonials.filter((t) => t.id !== rec.id) };
+    emit();
+    return;
+  }
+  const next = testimonialFromRow(rec);
+  const exists = state.publicTestimonials.some((t) => t.id === next.id);
+  state = {
+    ...state,
+    publicTestimonials: exists
+      ? state.publicTestimonials.map((t) => (t.id === next.id ? next : t))
+      : [next, ...state.publicTestimonials],
+  };
+  emit();
+}
+
 // Writes keep Supabase as the source of truth. Failures are reported, never
 // swallowed, so a broken sync can't masquerade as a successful save.
 function blogCloudSave(post: BlogPost | null, deletedId?: string): void {
@@ -954,23 +1194,22 @@ function blogCloudSave(post: BlogPost | null, deletedId?: string): void {
   void (async () => {
     try {
       if (deletedId) {
-        // A non-uuid id never reached the cloud, so there is nothing to remove.
         if (!UUID_PATTERN.test(deletedId)) return;
         const { error } = await client.from(TABLES.blogPosts).delete().eq("id", deletedId);
         if (error) throw error;
+        await loadPublicBlogPosts({ force: true, requireSuccess: true });
         return;
       }
       if (!post) return;
       const row = blogPostToRow(post);
 
       if (UUID_PATTERN.test(post.id)) {
-        const { error } = await client.from(TABLES.blogPosts).upsert(row, { onConflict: "id" });
+        const { error } = await client.from(TABLES.blogPosts).upsert(row, { onConflict: "id" }).select("id").single();
         if (error) throw error;
+        await loadPublicBlogPosts({ force: true, requireSuccess: true });
         return;
       }
 
-      // Legacy/local id: let Postgres mint the uuid, then adopt it locally so
-      // subsequent edits and deletes address the same row.
       const { id: _localId, ...withoutId } = row;
       const { data, error } = await client
         .from(TABLES.blogPosts)
@@ -981,13 +1220,14 @@ function blogCloudSave(post: BlogPost | null, deletedId?: string): void {
       const cloudId = (data as { id: string }).id;
       state = { ...state, blogPosts: state.blogPosts.map((item) => (item.id === post.id ? { ...item, id: cloudId } : item)) };
       emit();
+      await loadPublicBlogPosts({ force: true, requireSuccess: true });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (import.meta.env.DEV) console.error("[Olkinyei] blog cloud write failed:", message);
       notify({
         type: "error",
         title: "Not published to the website",
-        message: `The article is saved locally but Supabase rejected it: ${message.slice(0, 140)}`,
+        message: `Supabase rejected the article: ${message.slice(0, 140)}`,
         duration: 9000,
       });
     }
@@ -1771,7 +2011,11 @@ const actions = {
   /** Re-reads testimonials from the database after an import. */
   async reloadTestimonials(): Promise<void> {
     testimonialsBootstrapped = false;
-    await loadCloudTestimonials();
+    publicTestimonialsBootstrapped = false;
+    await Promise.all([
+      loadCloudTestimonials({ force: true }),
+      loadPublicTestimonials({ force: true }),
+    ]);
   },
 
   /** Staff moderation: approve, reject, flag, or return to the queue. */
@@ -1796,11 +2040,14 @@ const actions = {
       const { error } = await supabase
         .from(TABLES.testimonials)
         .update({ status, flagged: status === "flagged", moderated_by: actor.id, moderated_at: new Date().toISOString() })
-        .eq("id", id);
+        .eq("id", id)
+        .select("id")
+        .single();
       if (error) {
         notify({ type: "error", title: "Moderation failed", message: error.message });
         return;
       }
+      await loadPublicTestimonials({ force: true, requireSuccess: true });
     }
     audit(`testimonial.${status}`, "testimonial", "success", { actorId: actor.id, actorEmail: actor.email, targetId: id });
     void writeCloudAudit(actor.id, `testimonial.${status}`, "testimonial", { outcome: "success", targetId: id });
@@ -1834,8 +2081,9 @@ const actions = {
       if (patch.staffNotes !== undefined) row.staff_notes = patch.staffNotes || null;
       if (patch.sortOrder !== undefined) row.sort_order = patch.sortOrder;
       if (Object.keys(row).length > 0) {
-        const { error } = await supabase.from(TABLES.testimonials).update(row).eq("id", id);
+        const { error } = await supabase.from(TABLES.testimonials).update(row).eq("id", id).select("id").single();
         if (error) { notify({ type: "error", title: "Save failed", message: error.message }); return; }
+        await loadPublicTestimonials({ force: true, requireSuccess: true });
       }
     }
     audit("testimonial.updated", "testimonial", "success", { actorId: actor.id, targetId: id });
@@ -1857,6 +2105,7 @@ const actions = {
     if (supabase) {
       const { error } = await supabase.from(TABLES.testimonials).delete().eq("id", id);
       if (error) { notify({ type: "error", title: "Delete failed", message: error.message }); return; }
+      await loadPublicTestimonials({ force: true, requireSuccess: true });
     }
     audit("testimonial.deleted", "testimonial", "success", { actorId: actor.id, targetId: id });
     logActivity("deleted", "Testimonial", id, target.guestName);
@@ -2131,18 +2380,20 @@ const actions = {
     if (!p) return;
     state = { ...state, pages: state.pages.map((x) => x.id === id ? { ...x, ...patch, updatedAt: new Date().toISOString(), updatedBy: currentUser()?.id ?? "" } : x) };
     logActivity(patch.published === false ? "archived" : "updated", "Page", id, p.title);
-    notify({ type: "success", title: "Page updated", message: `${p.title} saved.` });
     emit();
-    void cloudSaveDocument("pages", state.pages);
+    void cloudSaveDocument("pages", state.pages)
+      .then(() => notify({ type: "success", title: "Page updated", message: `${p.title} saved.` }))
+      .catch((error) => notify({ type: "error", title: "Page save failed", message: error instanceof Error ? error.message : "Could not publish this page." }));
   },
 
   // Site Settings — logo, brand colors, tagline, contact info, analytics.
   updateSiteSettings(patch: Partial<SiteSettings>) {
     state = { ...state, siteSettings: { ...state.siteSettings, ...patch } };
     logActivity("updated", "Site Settings", "global", "Global site settings");
-    notify({ type: "success", title: "Settings saved", message: "Global site settings updated on all devices." });
     emit();
-    void cloudSaveDocument("site_settings", state.siteSettings);
+    void cloudSaveDocument("site_settings", state.siteSettings)
+      .then(() => notify({ type: "success", title: "Settings saved", message: "Global site settings updated on all devices." }))
+      .catch((error) => notify({ type: "error", title: "Settings save failed", message: error instanceof Error ? error.message : "Could not publish site settings." }));
   },
 
   resetDemoData() {
@@ -2151,14 +2402,19 @@ const actions = {
       users: seedUsers,
       bookings: seedBookings,
       packages: seedPackages,
+      publicPackages: seedPackages,
       destinations: seedDestinations,
       media: seedMedia,
       blogPosts: seedBlogPosts,
+      publicBlogPosts: seedBlogPosts,
       guides: seedGuides,
       vehicles: seedVehicles,
       customers: seedCustomers,
       pages: seedPages,
+      publicPages: seedPages,
       siteSettings: seedSiteSettings,
+      publicSiteSettings: seedSiteSettings,
+      publicTestimonials: [],
       activity: seedActivity,
       theme: state.theme,
       currentUserId: state.currentUserId,

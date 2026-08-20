@@ -154,7 +154,7 @@ function formatCurrency(value: number) {
 }
 
 function Logo({ compact = false }: { compact?: boolean }) {
-  const site = useCmsStore((state) => state.siteSettings);
+  const site = useCmsStore((state) => state.publicSiteSettings);
   const hasCustomLogo = Boolean(site.logo && site.logo !== "/logo.svg");
   if (hasCustomLogo) {
     return <span className={`brand-lockup brand-lockup--uploaded ${compact ? "brand-lockup--compact" : ""}`}><img src={site.logo} alt={site.brandName} className="brand-uploaded-logo" /></span>;
@@ -276,7 +276,7 @@ function SoundToggle() {
 }
 
 function Header({ page, navigate }: { page: Page; navigate: (page: Page) => void }) {
-  const site = useCmsStore((state) => state.siteSettings);
+  const site = useCmsStore((state) => state.publicSiteSettings);
   const [open, setOpen] = useState(false);
   const select = (next: Page) => { setOpen(false); navigate(next); };
   useEffect(() => {
@@ -322,7 +322,7 @@ function PageHero({ eyebrow, title, text, image, align = "left", children }: {
   align?: "left" | "center";
   children?: ReactNode;
 }) {
-  const cmsPage = useCmsStore((state) => state.pages.find((item) => item.route === window.location.pathname));
+  const cmsPage = useCmsStore((state) => state.publicPages.find((item) => item.route === window.location.pathname));
   const published = cmsPage?.published ? cmsPage : null;
   return (
     <section className={`page-hero page-hero--${align}`}>
@@ -347,7 +347,7 @@ function ImageReveal({ src, alt, className = "" }: { src: string; alt: string; c
 }
 
 function Footer({ navigate }: { navigate: (page: Page) => void; openAdmin?: () => void }) {
-  const site = useCmsStore((state) => state.siteSettings);
+  const site = useCmsStore((state) => state.publicSiteSettings);
   return (
     <footer className="footer">
       <div className="footer-main"><Logo /><h2>Go where the wild still sets the pace.</h2><MagneticButton className="button button--sand" onClick={() => navigate("contact")}>Begin a private journey <ArrowRight size={17} /></MagneticButton></div>
@@ -362,12 +362,12 @@ function Footer({ navigate }: { navigate: (page: Page) => void; openAdmin?: () =
 }
 
 function HomePage({ navigate, content, openSafari, onOpenPost }: { navigate: (page: Page) => void; content: EditableContent; openSafari: (safari: Safari) => void; onOpenPost: (slug: string) => void }) {
-  const cmsHome = useCmsStore((state) => state.pages.find((item) => item.route === "/"));
-  const site = useCmsStore((state) => state.siteSettings);
+  const cmsHome = useCmsStore((state) => state.publicPages.find((item) => item.route === "/"));
+  const site = useCmsStore((state) => state.publicSiteSettings);
   const liveSafaris = usePublishedSafaris();
   // Live blog posts from the CMS (Supabase blog_posts). Published only;
   // featured first, then newest. Static seed is just the offline fallback.
-  const cmsPosts = useCmsStore((state) => state.blogPosts);
+  const cmsPosts = useCmsStore((state) => state.publicBlogPosts);
   const publishedPosts = useMemo(() => {
     const live = cmsPosts
       .filter((p) => p.status === "published" && Boolean(p.publishedAt))
@@ -428,7 +428,7 @@ function HomePage({ navigate, content, openSafari, onOpenPost }: { navigate: (pa
 function HomeTestimonialPreview({ navigate }: { navigate: (page: Page) => void }) {
   // Same rule as TestimonialsSection: never derive a new array inside the
   // store selector, or useSyncExternalStore re-renders forever.
-  const allTestimonials = useCmsStore((state) => state.testimonials);
+  const allTestimonials = useCmsStore((state) => state.publicTestimonials);
   const featured = useMemo(
     () => allTestimonials.filter((item) => item.status === "approved").slice(0, 2),
     [allTestimonials],
@@ -496,7 +496,7 @@ function ExperienceModal({ safari, onClose, onBook }: { safari: Safari; onClose:
  * only while the database is empty or unreachable, so the site is never blank.
  */
 function usePublishedSafaris(): Safari[] {
-  const cmsPackages = useCmsStore((state) => state.packages);
+  const cmsPackages = useCmsStore((state) => state.publicPackages);
   return useMemo(() => {
     const live = cmsPackages.filter((pkg) => pkg.published && !pkg.archived);
     if (live.length === 0) return safaris;
@@ -550,7 +550,7 @@ function DestinationsPage({ onBook }: { onBook: (safari: Safari) => void }) {
 // Drafts, scheduled, and archived posts are never served here.
 
 function usePublishedPosts() {
-  const cmsPosts = useCmsStore((state) => state.blogPosts);
+  const cmsPosts = useCmsStore((state) => state.publicBlogPosts);
   return useMemo(() => cmsPosts
     .filter((post) => post.status === "published" && Boolean(post.publishedAt))
     .sort((a, b) => {
@@ -870,7 +870,7 @@ function TestimonialsSection() {
   // Select the RAW array. Filtering inside the selector would return a new
   // reference on every call, and useSyncExternalStore compares snapshots by
   // identity — that produces an infinite render loop and a blank page.
-  const allTestimonials = useCmsStore((state) => state.testimonials);
+  const allTestimonials = useCmsStore((state) => state.publicTestimonials);
   const ordered = useMemo(() => allTestimonials
     .filter((item) => item.status === "approved")
     .sort((a, b) => {
@@ -1032,7 +1032,7 @@ function BookingLookup({ bookings }: { bookings: Booking[] }) {
 }
 
 function ContactPage({ initialSafari, bookings, onStored, content }: { initialSafari: Safari | null; bookings: Booking[]; onStored: (booking: Booking) => void; content: EditableContent }) {
-  const site = useCmsStore((state) => state.siteSettings);
+  const site = useCmsStore((state) => state.publicSiteSettings);
   return <><PageHero eyebrow="PRIVATE JOURNEY DESIGN" title="Your safari starts with a conversation." text="Share a few details. One dedicated designer will shape a thoughtful first proposal within one business day." image={imagery.lodge} /><section className="booking-section section-pad"><div className="booking-aside"><p className="eyebrow">PLAN YOUR JOURNEY</p><h2>There are no ordinary questions.</h2><p>We will consider the season, lodge character, flight connections and the pace that works for your party. Nothing is confirmed until it feels right.</p><div><Headphones /><span>Prefer to speak?</span><a href={`tel:${site.phone.replace(/\s+/g, "")}`}>{site.phone}</a><a href={`mailto:${content.contactEmail}`}>{content.contactEmail}</a></div></div><BookingForm initialSafari={initialSafari} onStored={onStored} /></section><section className="contact-details section-pad"><div><p className="eyebrow">FIELD OFFICES</p><h2>Close to the places we love.</h2></div><address>{site.addresses.map((entry) => <div key={entry.city}><span>{entry.city}</span><strong>{entry.city}</strong><p>{entry.address}<br />Monday to Friday, 08:00 - 18:00 EAT</p></div>)}</address><BookingLookup bookings={bookings} /></section></>;
 }
 
@@ -1090,7 +1090,7 @@ function AdminPanel({ bookings, onClose, onBookings, content, onContent }: { boo
  * out while the site is closed.
  */
 function SiteClosedScreen({ mode }: { mode: "maintenance" | "coming-soon" }) {
-  const site = useCmsStore((state) => state.siteSettings);
+  const site = useCmsStore((state) => state.publicSiteSettings);
   const isMaintenance = mode === "maintenance";
   return (
     <div className="site-closed">
@@ -1122,12 +1122,12 @@ function PublicApp() {
   const [adminOpen, setAdminOpen] = useState(false);
   const [bookings, setBookings] = useState<Booking[]>(() => readStorage("olkinyei-bookings", []));
   const [content, setContent] = useState<EditableContent>(() => readStorage("olkinyei-content", defaultContent));
-  const cmsHomePage = useCmsStore((state) => state.pages.find((item) => item.route === "/"));
-  const cmsSettings = useCmsStore((state) => state.siteSettings);
+  const cmsHomePage = useCmsStore((state) => state.publicPages.find((item) => item.route === "/"));
+  const cmsSettings = useCmsStore((state) => state.publicSiteSettings);
   const publicContent: EditableContent = {
-    homeStatement: String(cmsHomePage?.content.homeStatement || content.homeStatement),
-    conservationStatement: String(cmsHomePage?.content.conservationStatement || content.conservationStatement),
-    contactEmail: cmsSettings.contactEmail || content.contactEmail,
+    homeStatement: String(cmsHomePage?.content.homeStatement || defaultContent.homeStatement),
+    conservationStatement: String(cmsHomePage?.content.conservationStatement || defaultContent.conservationStatement),
+    contactEmail: cmsSettings.contactEmail || defaultContent.contactEmail,
   };
   const [postSlug, setPostSlug] = useState<string | null>(() => postSlugFromPath(window.location.pathname));
   const navigate = useCallback((next: Page) => { if (window.location.pathname !== ROUTES[next]) window.history.pushState({}, "", ROUTES[next]); setPage(next); setPostSlug(null); window.scrollTo({ top: 0, behavior: "instant" }); }, []);
@@ -1179,9 +1179,9 @@ function PublicApp() {
   }, []);
   useEffect(() => {
     const titles: Record<Page, string> = { home: "Olkinyei Expeditions | Private Luxury Safaris", about: "Our Story | Olkinyei Expeditions", experiences: "Private Safari Experiences | Olkinyei Expeditions", destinations: "Kenya and Tanzania Destinations | Olkinyei Expeditions", gallery: "Field Notes and Gallery | Olkinyei Expeditions", journal: "The Journal | Olkinyei Expeditions", contact: "Plan Your Safari | Olkinyei Expeditions" };
-    const cmsPage = cmsStore.getState().pages.find((item) => item.route === ROUTES[page]);
+    const cmsPage = cmsStore.getState().publicPages.find((item) => item.route === ROUTES[page]);
     // Article pages take their metadata from the published post itself.
-    const article = postSlug ? cmsStore.getState().blogPosts.find((item) => item.slug === postSlug && item.status === "published") : undefined;
+    const article = postSlug ? cmsStore.getState().publicBlogPosts.find((item) => item.slug === postSlug && item.status === "published") : undefined;
     const seoTitle = article
       ? (article.seo.title || `${article.title} | Olkinyei Expeditions`)
       : cmsPage?.published && cmsPage.seo.title ? cmsPage.seo.title : titles[page];
@@ -1284,7 +1284,7 @@ export default function App() {
  * maintenance mode can never lock an administrator out.
  */
 function PublicSite() {
-  const site = useCmsStore((state) => state.siteSettings);
+  const site = useCmsStore((state) => state.publicSiteSettings);
   if (site.maintenanceMode) return <SiteClosedScreen mode="maintenance" />;
   if (site.comingSoon) return <SiteClosedScreen mode="coming-soon" />;
   return <PublicApp />;
