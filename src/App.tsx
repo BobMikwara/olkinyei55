@@ -30,15 +30,12 @@ import {
   Eye,
   Filter,
   Headphones,
-  ImagePlus,
-  LockKeyhole,
   Menu,
   Minus,
   Pause,
   Play,
   Plus,
   Search,
-  Settings2,
   ShieldCheck,
   Star,
   Volume2,
@@ -61,7 +58,6 @@ import {
   persistBooking,
   subscribeToBookings,
   supabase,
-  updateCloudBookingStatus,
 } from "./lib/supabase";
 import { store as cmsStore, useStore as useCmsStore } from "./admin/store";
 import { SOURCE_LABELS } from "./admin/reviewProviders";
@@ -463,13 +459,17 @@ function HomeTestimonialPreview({ navigate }: { navigate: (page: Page) => void }
 }
 
 function AboutPage({ navigate }: { navigate: (page: Page) => void }) {
+  // Guides are CMS-managed (Supabase public.guides); the static copy below is
+  // only a graceful fallback for a database that has not been seeded.
+  const guides = usePublicGuides();
+  const guide = guides[0];
   return (
     <>
       <PageHero eyebrow="OUR STORY" title="Born here. Still led by wonder." text="An independent East African company creating private journeys with deep local knowledge and a light footprint." image={imagery.portrait} />
       <section className="about-intro section-pad"><p className="vertical-label">WHY WE EXIST</p><div><p className="eyebrow" data-reveal>A different measure of luxury</p><h2 className="split-reveal">Not more things. More time, more space, more meaning.</h2><div className="two-column-copy" data-reveal><p>Olkinyei was founded by naturalists who saw that the finest safari was not the fastest route between sightings. It was the one that left room for silence, surprise and genuine connection.</p><p>Today our journeys are still designed in Nairobi and Arusha by people who know these landscapes first-hand. We stay small by choice, pairing each guest with one journey designer and one exceptional guide.</p></div></div></section>
       <section className="story-split"><ImageReveal src={imagery.lion} alt="A lion resting quietly beneath a tree" /><div className="story-split-copy"><p className="eyebrow">OUR PHILOSOPHY</p><h2 className="split-reveal">Wait longer.<br />Go deeper.</h2><p>We avoid sighting-chasing and crowded routes. Longer stays in fewer places reveal the relationships that make an ecosystem whole: a storm gathering, a lioness listening, a guide reading a faint mark in the dust.</p><div className="principles"><div><span>01</span><h3>Private by design</h3><p>Your vehicle, guide and pace are entirely your own.</p></div><div><span>02</span><h3>Local by nature</h3><p>East African ownership keeps knowledge and value close to home.</p></div><div><span>03</span><h3>Light on the land</h3><p>Smaller camps and measured operations protect what draws us here.</p></div></div></div></section>
       <section className="timeline section-pad"><SectionHeading number="02" eyebrow="OUR JOURNEY" title="A small company with a long view." /><div className="timeline-list">{timeline.map((item) => <div key={item.year} data-reveal><strong>{item.year}</strong><span /><p>{item.text}</p></div>)}</div></section>
-      <section className="guides section-pad dark-section"><SectionHeading number="03" eyebrow="YOUR GUIDES" title="The people who make the landscape legible." text="Career naturalists, gifted hosts and patient interpreters of the wild." dark /><div className="guide-feature"><div className="guide-portrait"><img src={imagery.portrait} alt="Senior safari guide Daniel Ole Nkoitoi" loading="lazy" /></div><div className="guide-quote"><blockquote>"The sighting is only the beginning. My work is to help you understand what led to it."</blockquote><p>Daniel Ole Nkoitoi / Senior guide, Maasai Mara</p><dl><div><dt>In the field</dt><dd>19 years</dd></div><div><dt>Speciality</dt><dd>Predator behaviour</dd></div><div><dt>Languages</dt><dd>Maa, Swahili, English</dd></div></dl></div></div></section>
+      <section className="guides section-pad dark-section"><SectionHeading number="03" eyebrow="YOUR GUIDES" title="The people who make the landscape legible." text="Career naturalists, gifted hosts and patient interpreters of the wild." dark /><div className="guide-feature"><div className="guide-portrait"><img src={guide?.portrait || imagery.portrait} alt={`${guide?.title ?? "Senior safari guide"} ${guide?.name ?? "Daniel Ole Nkoitoi"}`} loading="lazy" /></div><div className="guide-quote"><blockquote>"The sighting is only the beginning. My work is to help you understand what led to it."</blockquote><p>{guide?.name ?? "Daniel Ole Nkoitoi"} / {guide?.title ?? "Senior guide, Maasai Mara"}</p><dl><div><dt>In the field</dt><dd>{guide?.yearsInField ?? 19} years</dd></div><div><dt>Speciality</dt><dd>{guide?.speciality ?? "Predator behaviour"}</dd></div><div><dt>Languages</dt><dd>{guide?.languages?.length ? guide.languages.join(", ") : "Maa, Swahili, English"}</dd></div></dl></div></div></section>
       <section className="impact section-pad"><SectionHeading number="04" eyebrow="CONSERVATION" title="Travel can keep wild land wild." text="We work with conservancies, not around them. A transparent contribution from every guest funds habitat leases and locally chosen projects." /><div className="impact-lines"><p data-reveal><strong>Land</strong> Long-term leases protect migration corridors beyond national park borders.</p><p data-reveal><strong>People</strong> Local guide fellowships and supplier partnerships build durable livelihoods.</p><p data-reveal><strong>Wildlife</strong> Predator-proof bomas reduce conflict between herders and carnivores.</p></div><div className="awards-line"><span>Recognised by</span><strong>Conde Nast Traveller</strong><strong>Travel + Leisure</strong><strong>Safari Awards Africa</strong><strong>B Corp Pending</strong></div><MagneticButton className="button button--dark" onClick={() => navigate("contact")}>Travel with purpose <ArrowRight size={17} /></MagneticButton></section>
     </>
   );
@@ -517,6 +517,55 @@ function usePublishedSafaris(): Safari[] {
   }, [cmsPackages]);
 }
 
+/**
+ * Destination list for the public map and destinations page. Reads the CMS's
+ * published destinations from the shared store (Supabase public.destinations);
+ * the bundled seed only appears when the database is unreachable (demo mode).
+ */
+function useDestinations(): Destination[] {
+  const cmsDestinations = useCmsStore((state) => state.publicDestinations);
+  return useMemo(() => {
+    if (cmsDestinations.length === 0) return destinations;
+    return cmsDestinations.map((d) => ({
+      name: d.name,
+      country: d.country,
+      coordinates: d.coordinates,
+      best: d.bestTime,
+      animal: d.animal,
+      image: d.image,
+      description: d.description,
+    }));
+  }, [cmsDestinations]);
+}
+
+/**
+ * Guide roster for the public "Your Guides" section. Reads the CMS's active
+ * guides from the shared store (Supabase public.guides).
+ */
+function usePublicGuides() {
+  const cmsGuides = useCmsStore((state) => state.publicGuides);
+  return cmsGuides.filter((g) => g.status === "active");
+}
+
+/**
+ * Gallery images for the Field Notes archive. Reads published media assets
+ * from the shared store (Supabase public.media_assets); the bundled seed
+ * gallery is only the offline fallback.
+ */
+function useGalleryItems() {
+  const cmsMedia = useCmsStore((state) => state.publicMedia);
+  return useMemo(() => {
+    const images = cmsMedia.filter((m) => m.type === "image" && !m.archived);
+    if (images.length === 0) return galleryItems;
+    return images.map((m) => ({
+      src: m.url,
+      alt: m.alt || m.name,
+      type: m.category || "Wildlife",
+      size: (m.dimensions && m.dimensions.width > m.dimensions.height ? "wide" : "tall") as "tall" | "wide",
+    }));
+  }, [cmsMedia]);
+}
+
 function ExperiencesPage({ openSafari, onBook }: { openSafari: (safari: Safari) => void; onBook: (safari: Safari) => void }) {
   const [region, setRegion] = useState("All");
   const liveSafaris = usePublishedSafaris();
@@ -529,14 +578,16 @@ function ExperiencesPage({ openSafari, onBook }: { openSafari: (safari: Safari) 
 }
 
 function SafariMap({ selected, onSelect }: { selected: Destination; onSelect: (destination: Destination) => void }) {
-  return <div className="safari-map"><svg viewBox="0 0 100 100" role="img" aria-label="Interactive map of safari destinations in Kenya and Tanzania"><defs><filter id="soft"><feGaussianBlur stdDeviation="1.2" /></filter></defs><path d="M28 7L69 12 88 32 83 55 70 94 31 89 15 55 18 25Z" fill="#273024" stroke="#8d916f" strokeWidth=".4" /><path d="M20 37C43 28 57 42 84 30M28 62C48 52 62 65 79 58" fill="none" stroke="#6f765a" strokeWidth=".35" strokeDasharray="2 2" /><path d="M25 65C36 60 44 72 58 67S74 72 82 65" fill="none" stroke="#b9b497" opacity=".45" filter="url(#soft)" /></svg>{destinations.map((destination) => <button key={destination.name} className={selected.name === destination.name ? "active" : ""} style={{ left: `${destination.coordinates[0]}%`, top: `${destination.coordinates[1]}%` }} onClick={() => onSelect(destination)} aria-label={`Select ${destination.name}`}><span /><small>{destination.name}</small></button>)}<p className="map-kenya">KENYA</p><p className="map-tanzania">TANZANIA</p></div>;
+  const destinationList = useDestinations();
+  return <div className="safari-map"><svg viewBox="0 0 100 100" role="img" aria-label="Interactive map of safari destinations in Kenya and Tanzania"><defs><filter id="soft"><feGaussianBlur stdDeviation="1.2" /></filter></defs><path d="M28 7L69 12 88 32 83 55 70 94 31 89 15 55 18 25Z" fill="#273024" stroke="#8d916f" strokeWidth=".4" /><path d="M20 37C43 28 57 42 84 30M28 62C48 52 62 65 79 58" fill="none" stroke="#6f765a" strokeWidth=".35" strokeDasharray="2 2" /><path d="M25 65C36 60 44 72 58 67S74 72 82 65" fill="none" stroke="#b9b497" opacity=".45" filter="url(#soft)" /></svg>{destinationList.map((destination) => <button key={destination.name} className={selected.name === destination.name ? "active" : ""} style={{ left: `${destination.coordinates[0]}%`, top: `${destination.coordinates[1]}%` }} onClick={() => onSelect(destination)} aria-label={`Select ${destination.name}`}><span /><small>{destination.name}</small></button>)}<p className="map-kenya">KENYA</p><p className="map-tanzania">TANZANIA</p></div>;
 }
 
 function DestinationsPage({ onBook }: { onBook: (safari: Safari) => void }) {
   const liveSafaris = usePublishedSafaris();
+  const destinationList = useDestinations();
   const [country, setCountry] = useState<"All" | "Kenya" | "Tanzania">("All");
-  const [selected, setSelected] = useState(destinations[0]);
-  const list = useMemo(() => destinations.filter((destination) => country === "All" || destination.country === country), [country]);
+  const [selected, setSelected] = useState(destinationList[0]);
+  const list = useMemo(() => destinationList.filter((destination) => country === "All" || destination.country === country), [country, destinationList]);
   useEffect(() => { if (!list.some((item) => item.name === selected.name)) setSelected(list[0]); }, [list, selected.name]);
   return (
     <><PageHero eyebrow="KENYA + TANZANIA" title="The map is only the beginning." text="From volcanic highlands to endless grassland, explore the places that shape our journeys." image={imagery.mara} /><section className="destinations-map-section"><div className="map-side"><p className="eyebrow">01 / EXPLORE EAST AFRICA</p><h2 className="split-reveal">Move through the wild.</h2><div className="country-switch">{(["All", "Kenya", "Tanzania"] as const).map((item) => <button key={item} onClick={() => setCountry(item)} className={country === item ? "active" : ""}>{item}</button>)}</div><div className="destination-list">{list.map((item) => <button key={item.name} className={selected.name === item.name ? "active" : ""} onClick={() => setSelected(item)}><span>{item.country}</span>{item.name}<ArrowRight /></button>)}</div></div><SafariMap selected={selected} onSelect={setSelected} /><AnimatePresence mode="wait"><motion.div className="destination-focus" key={selected.name} initial={{ opacity: 0, y: 25 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -15 }}><img src={selected.image} alt={`${selected.name} landscape`} /><div><p>{selected.country}</p><h3>{selected.name}</h3><p>{selected.description}</p><dl><div><dt>Best time</dt><dd>{selected.best}</dd></div><div><dt>Known for</dt><dd>{selected.animal}</dd></div></dl></div></motion.div></AnimatePresence></section>
@@ -944,10 +995,11 @@ function TestimonialsSection() {
  * that testimonials are read live from the CMS.
  */
 function FieldNotesSections() {
+  const gallery = useGalleryItems();
   const [filter, setFilter] = useState("All");
   const [lightbox, setLightbox] = useState<number | null>(null);
   const filters = ["All", "Wildlife", "Migration", "Lodges", "People", "Landscape"];
-  const visible = galleryItems.filter((item) => filter === "All" || item.type === filter);
+  const visible = gallery.filter((item) => filter === "All" || item.type === filter);
   const showNext = (direction: number) => setLightbox((current) => current === null ? null : (current + direction + visible.length) % visible.length);
 
   useEffect(() => {
@@ -966,7 +1018,7 @@ function FieldNotesSections() {
       <section className="gallery-section section-pad"><div className="gallery-header"><SectionHeading number="02" eyebrow="THE ARCHIVE" title="Light, dust, life." /><div className="gallery-filters">{filters.map((item) => <button className={filter === item ? "active" : ""} key={item} onClick={() => setFilter(item)}>{item}</button>)}</div></div><motion.div className="masonry" layout>{visible.map((item, index) => <motion.button layout className={`masonry-item masonry-item--${item.size}`} key={item.src} onClick={() => setLightbox(index)} initial={{ opacity: 0 }} animate={{ opacity: 1 }}><img src={item.src} alt={item.alt} loading="lazy" /><span><small>{item.type}</small><Eye />View</span></motion.button>)}</motion.div></section>
       <section className="drone-film"><video controls playsInline preload="none" poster={imagery.heroPoster}><source src={imagery.heroVideo} type="video/mp4" /></video><div><p className="eyebrow">FROM ABOVE / 01:12</p><h2>The migration draws its own map.</h2><p>Film by our Serengeti field team.</p></div></section>
       <TestimonialsSection />
-      <section className="instagram-strip section-pad"><p className="eyebrow">@OLKINYEIEXPEDITIONS</p><h2>Dispatches from the field.</h2><a href="https://www.instagram.com" target="_blank" rel="noreferrer">Follow on Instagram <ExternalLink size={15} /></a><div>{galleryItems.slice(2, 7).map((item) => <a key={item.src} href="https://www.instagram.com" target="_blank" rel="noreferrer" aria-label="View field dispatch on Instagram"><img src={item.src} alt="" loading="lazy" /></a>)}</div></section>
+      <section className="instagram-strip section-pad"><p className="eyebrow">@OLKINYEIEXPEDITIONS</p><h2>Dispatches from the field.</h2><a href="https://www.instagram.com" target="_blank" rel="noreferrer">Follow on Instagram <ExternalLink size={15} /></a><div>{gallery.slice(2, 7).map((item) => <a key={item.src} href="https://www.instagram.com" target="_blank" rel="noreferrer" aria-label="View field dispatch on Instagram"><img src={item.src} alt="" loading="lazy" /></a>)}</div></section>
       <AnimatePresence>{lightbox !== null && <motion.div className="lightbox" role="dialog" aria-modal="true" aria-label="Gallery lightbox" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}><button className="lightbox-close" onClick={() => setLightbox(null)} aria-label="Close lightbox"><X /></button><button className="lightbox-prev" onClick={() => showNext(-1)} aria-label="Previous image"><ArrowLeft /></button><motion.img key={visible[lightbox].src} src={visible[lightbox].src} alt={visible[lightbox].alt} initial={{ opacity: 0.4, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} /><button className="lightbox-next" onClick={() => showNext(1)} aria-label="Next image"><ArrowRight /></button><p>{String(lightbox + 1).padStart(2, "0")} / {String(visible.length).padStart(2, "0")} &nbsp; {visible[lightbox].alt}</p></motion.div>}</AnimatePresence>
     </>
   );
@@ -1005,8 +1057,12 @@ function BookingForm({ initialSafari, onStored }: { initialSafari: Safari | null
     const missing = [!form.name && "Enter your name", !/^\S+@\S+\.\S+$/.test(form.email) && "Enter a valid email", !form.phone && "Enter a phone number", !consent && "Accept the privacy notice to continue"].filter(Boolean) as string[];
     setErrors(missing); if (missing.length) return;
     const booking: Booking = { ...form, reference: `OLK-${new Date().getFullYear()}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`, createdAt: new Date().toISOString(), status: "New" };
-    const current = readStorage<Booking[]>("olkinyei-bookings", []);
-    localStorage.setItem("olkinyei-bookings", JSON.stringify([booking, ...current]));
+    // The database is the single source of truth for bookings; localStorage is
+    // only a demo-mode bridge when no cloud backend is configured.
+    if (!hasCloudBackend) {
+      const current = readStorage<Booking[]>("olkinyei-bookings", []);
+      localStorage.setItem("olkinyei-bookings", JSON.stringify([booking, ...current]));
+    }
     setSubmitting(true);
     const result = await persistBooking(booking);
     setSubmitting(false);
@@ -1036,53 +1092,6 @@ function BookingLookup({ bookings }: { bookings: Booking[] }) {
 function ContactPage({ initialSafari, bookings, onStored, content }: { initialSafari: Safari | null; bookings: Booking[]; onStored: (booking: Booking) => void; content: EditableContent }) {
   const site = useCmsStore((state) => state.publicSiteSettings);
   return <><PageHero eyebrow="PRIVATE JOURNEY DESIGN" title="Your safari starts with a conversation." text="Share a few details. One dedicated designer will shape a thoughtful first proposal within one business day." image={imagery.lodge} /><section className="booking-section section-pad"><div className="booking-aside"><p className="eyebrow">PLAN YOUR JOURNEY</p><h2>There are no ordinary questions.</h2><p>We will consider the season, lodge character, flight connections and the pace that works for your party. Nothing is confirmed until it feels right.</p><div><Headphones /><span>Prefer to speak?</span><a href={`tel:${site.phone.replace(/\s+/g, "")}`}>{site.phone}</a><a href={`mailto:${content.contactEmail}`}>{content.contactEmail}</a></div></div><BookingForm initialSafari={initialSafari} onStored={onStored} /></section><section className="contact-details section-pad"><div><p className="eyebrow">FIELD OFFICES</p><h2>Close to the places we love.</h2></div><address>{site.addresses.map((entry) => <div key={entry.city}><span>{entry.city}</span><strong>{entry.city}</strong><p>{entry.address}<br />Monday to Friday, 08:00 - 18:00 EAT</p></div>)}</address><BookingLookup bookings={bookings} /></section></>;
-}
-
-function AdminPanel({ bookings, onClose, onBookings, content, onContent }: { bookings: Booking[]; onClose: () => void; onBookings: (bookings: Booking[]) => void; content: EditableContent; onContent: (content: EditableContent) => void }) {
-  const cmsPackages = useCmsStore((state) => state.packages);
-  const [authenticated, setAuthenticated] = useState(false); const [adminEmail, setAdminEmail] = useState(""); const [code, setCode] = useState(""); const [error, setError] = useState(""); const [tab, setTab] = useState("Overview");
-  const [prices, setPrices] = useState<Record<string, number>>(() => readStorage("olkinyei-prices", Object.fromEntries(cmsPackages.map((pkg) => [pkg.id, pkg.price]))));
-  const [galleryUrl, setGalleryUrl] = useState(""); const [galleryAssets, setGalleryAssets] = useState<string[]>(() => readStorage("olkinyei-gallery-admin", galleryItems.map((item) => item.src)));
-  const [posts, setPosts] = useState(() => readStorage("olkinyei-blog-posts", blogPosts));
-  const tabs = ["Overview", "Bookings", "Packages", "Content", "Media", "Operations"];
-  useEffect(() => {
-    const closeOnEscape = (event: globalThis.KeyboardEvent) => { if (event.key === "Escape") onClose(); };
-    window.addEventListener("keydown", closeOnEscape);
-    return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [onClose]);
-  const login = async (event: FormEvent) => {
-    event.preventDefault();
-    setError("");
-    if (hasCloudBackend && supabase) {
-      const { error: authError } = await supabase.auth.signInWithPassword({ email: adminEmail, password: code });
-      if (authError) { setError(authError.message); return; }
-      const cloudBookings = await getCloudBookings();
-      onBookings(cloudBookings);
-      setAuthenticated(true);
-      return;
-    }
-    if (code === "OLK2026") setAuthenticated(true); else setError("That access code is not recognised.");
-  };
-  const setStatus = (reference: string, status: Booking["status"]) => { const updated = bookings.map((booking) => booking.reference === reference ? { ...booking, status } : booking); localStorage.setItem("olkinyei-bookings", JSON.stringify(updated)); onBookings(updated); void updateCloudBookingStatus(reference, status); };
-  const savePrice = (id: string, value: number) => { const updated = { ...prices, [id]: value }; setPrices(updated); localStorage.setItem("olkinyei-prices", JSON.stringify(updated)); };
-  const addAsset = () => { if (!/^https?:\/\//.test(galleryUrl)) return; const updated = [galleryUrl, ...galleryAssets]; setGalleryAssets(updated); localStorage.setItem("olkinyei-gallery-admin", JSON.stringify(updated)); setGalleryUrl(""); };
-  const editPost = (index: number) => {
-    const title = window.prompt("Edit article title", posts[index].title)?.trim();
-    if (!title) return;
-    const updated = posts.map((post, current) => current === index ? { ...post, title } : post);
-    setPosts(updated);
-    localStorage.setItem("olkinyei-blog-posts", JSON.stringify(updated));
-  };
-  return <motion.div className="admin-shell" role="dialog" aria-modal="true" aria-label="Olkinyei administration" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-    {!authenticated ? <div className="admin-login"><button onClick={onClose} aria-label="Close admin"><X /></button><Logo /><LockKeyhole size={34} /><h2>Private field office</h2><p>{hasCloudBackend ? "Sign in with an authorised Olkinyei team account." : <>Use the demonstration access code <strong>OLK2026</strong>.</>}</p><form onSubmit={login}>{hasCloudBackend && <input type="email" value={adminEmail} onChange={(e) => setAdminEmail(e.target.value)} placeholder="Team email" autoComplete="username" required />}<input type="password" value={code} onChange={(e) => setCode(e.target.value)} placeholder={hasCloudBackend ? "Password" : "Access code"} autoComplete="current-password" autoFocus={!hasCloudBackend} /><button className="button button--dark" type="submit">Enter dashboard <ArrowRight size={16} /></button>{error && <p role="alert">{error}</p>}</form></div> : <div className="admin-dashboard"><aside><Logo compact /><nav>{tabs.map((item) => <button key={item} className={tab === item ? "active" : ""} onClick={() => setTab(item)}>{item}</button>)}</nav><button onClick={onClose}><ArrowLeft size={15} /> Return to site</button></aside><main><header><div><p>Olkinyei Studio</p><h1>{tab}</h1></div><button onClick={onClose} aria-label="Close dashboard"><X /></button></header>
-    {tab === "Overview" && <div className="admin-overview"><div className="admin-metrics"><div><span>Active requests</span><strong>{bookings.filter((item) => item.status !== "Cancelled").length}</strong><small>Synced from booking engine</small></div><div><span>Expected guests</span><strong>{bookings.reduce((sum, item) => sum + item.adults + item.children, 0)}</strong><small>Across current requests</small></div><div><span>Published packages</span><strong>{cmsPackages.filter((p) => p.published && !p.archived).length}</strong><small>All available online</small></div><div><span>Media assets</span><strong>{galleryAssets.length}</strong><small>Optimised source URLs</small></div></div><div className="admin-chart"><h2>Request activity</h2><div>{[28, 52, 36, 74, 61, 88, 68, 94, 76, 83, 58, 72].map((height, index) => <span key={index} style={{ height: `${height}%` }}><small>{index + 1}</small></span>)}</div></div><div className="admin-recent"><h2>Latest requests</h2>{bookings.slice(0, 4).map((booking) => <p key={booking.reference}><span>{booking.reference}</span><strong>{booking.name}</strong><small>{booking.safari}</small><em>{booking.status}</em></p>)}{!bookings.length && <p>No requests yet. New public booking submissions appear here instantly.</p>}</div></div>}
-    {tab === "Bookings" && <div className="admin-table"><div className="table-head"><span>Reference / Guest</span><span>Journey</span><span>Travel</span><span>Status</span></div>{bookings.map((booking) => <div key={booking.reference}><span><strong>{booking.reference}</strong><small>{booking.name}<br />{booking.email}</small></span><span>{booking.safari}<small>{booking.adults + booking.children} guests / {booking.budget}</small></span><span>{booking.startDate}<small>to {booking.endDate}</small></span><span><select value={booking.status} onChange={(e) => setStatus(booking.reference, e.target.value as Booking["status"])}><option>New</option><option>Confirmed</option><option>In planning</option><option>Cancelled</option></select></span></div>)}{!bookings.length && <p className="admin-empty">No bookings have been submitted yet.</p>}</div>}
-    {tab === "Packages" && <div className="package-admin"><div className="admin-note"><Settings2 /><p>Pricing changes are stored in the local content layer and available for the next published release.</p></div>{cmsPackages.map((pkg) => <div key={pkg.id}><img src={pkg.image} alt="" /><span><strong>{pkg.title}</strong><small>{pkg.duration} / {pkg.region}</small></span><label>From USD<input type="number" value={prices[pkg.id] ?? pkg.price} onChange={(e) => savePrice(pkg.id, Number(e.target.value))} /></label></div>)}</div>}
-    {tab === "Content" && <div className="content-admin"><div><p className="eyebrow">HOME PAGE</p><label>Brand statement<textarea value={content.homeStatement} onChange={(e) => onContent({ ...content, homeStatement: e.target.value })} rows={5} /></label><label>Conservation statement<textarea value={content.conservationStatement} onChange={(e) => onContent({ ...content, conservationStatement: e.target.value })} rows={5} /></label><label>Journey design email<input type="email" value={content.contactEmail} onChange={(e) => onContent({ ...content, contactEmail: e.target.value })} /></label><small>Changes save automatically and are visible on the public site.</small></div><div><p className="eyebrow">SEO JOURNAL</p>{posts.map((post, index) => <article key={`${post.title}-${index}`}><span>{post.category}</span><strong>{post.title}</strong><small>{post.date}</small><button onClick={() => editPost(index)} aria-label={`Edit ${post.title}`}><Settings2 /></button></article>)}</div></div>}
-    {tab === "Media" && <div className="media-admin"><div className="media-upload"><ImagePlus /><h2>Add a hosted media asset</h2><p>Paste an HTTPS image URL from your approved storage bucket.</p><input value={galleryUrl} onChange={(e) => setGalleryUrl(e.target.value)} placeholder="https://..." /><button className="button button--dark" onClick={addAsset}>Add to library</button></div><div className="media-grid">{galleryAssets.map((item, index) => <div key={`${item}-${index}`}><img src={item} alt="" /><button onClick={() => { const updated = galleryAssets.filter((_, current) => current !== index); setGalleryAssets(updated); localStorage.setItem("olkinyei-gallery-admin", JSON.stringify(updated)); }} aria-label="Remove media asset"><X /></button></div>)}</div></div>}
-    {tab === "Operations" && <div className="operations"><section><h2>Guides</h2><p><strong>Daniel Ole Nkoitoi</strong><span>Senior guide / Mara</span><em>In field</em></p><p><strong>Neema Lema</strong><span>Photographic guide / Serengeti</span><em>Available</em></p><p><strong>Joseph Mollel</strong><span>Walking guide / Tarangire</span><em>In field</em></p></section><section><h2>Vehicles</h2><p><strong>OLK-04</strong><span>Land Cruiser / Arusha</span><em>Ready</em></p><p><strong>OLK-07</strong><span>Photo vehicle / Mara</span><em>Service due</em></p><p><strong>OLK-09</strong><span>Land Cruiser / Nairobi</span><em>Ready</em></p></section><section><h2>Availability</h2><p><strong>Migration season</strong><span>July to September</span><em>Limited</em></p><p><strong>Green season</strong><span>January to March</span><em>Open</em></p></section><section><h2>Invoices</h2><p><strong>Automated draft invoices</strong><span>Generated after confirmation</span><em>{bookings.filter((item) => item.status === "Confirmed").length} pending</em></p></section></div>}
-    </main></div>}
-  </motion.div>;
 }
 
 /**
@@ -1122,9 +1131,7 @@ function PublicApp() {
   });
   const [selectedSafari, setSelectedSafari] = useState<Safari | null>(null);
   const [bookingSafari, setBookingSafari] = useState<Safari | null>(null);
-  const [adminOpen, setAdminOpen] = useState(false);
-  const [bookings, setBookings] = useState<Booking[]>(() => readStorage("olkinyei-bookings", []));
-  const [content, setContent] = useState<EditableContent>(() => readStorage("olkinyei-content", defaultContent));
+  const [bookings, setBookings] = useState<Booking[]>(() => (hasCloudBackend ? [] : readStorage("olkinyei-bookings", [])));
   const cmsHomePage = useCmsStore((state) => state.publicPages.find((item) => item.route === "/"));
   const cmsSettings = useCmsStore((state) => state.publicSiteSettings);
   const publicContent: EditableContent = {
@@ -1149,7 +1156,6 @@ function PublicApp() {
   }, []);
   const bookSafari = (safari: Safari) => { setSelectedSafari(null); setBookingSafari(safari); navigate("contact"); };
   const completeLoader = useCallback(() => { try { sessionStorage.setItem("olkinyei-intro", "true"); } catch { /* Browsing can continue when storage is blocked. */ } setLoading(false); }, []);
-  const saveContent = (updated: EditableContent) => { setContent(updated); localStorage.setItem("olkinyei-content", JSON.stringify(updated)); };
   useEffect(() => {
     const pop = () => {
       setPage(pageFromPath(window.location.pathname));
@@ -1161,11 +1167,8 @@ function PublicApp() {
   useEffect(() => {
     if (!hasCloudBackend) return;
     void getCloudBookings().then((cloudBookings) => {
-      setBookings((current) => {
-        const merged = [...cloudBookings, ...current.filter((local) => !cloudBookings.some((cloud) => cloud.reference === local.reference))];
-        localStorage.setItem("olkinyei-bookings", JSON.stringify(merged));
-        return merged;
-      });
+      // Cloud is authoritative; local entries only fill gaps when offline.
+      setBookings((current) => [...cloudBookings, ...current.filter((local) => !cloudBookings.some((cloud) => cloud.reference === local.reference))]);
     });
     const channel = subscribeToBookings((booking) => {
       setBookings((current) => current.some((item) => item.reference === booking.reference) ? current : [booking, ...current]);
@@ -1232,7 +1235,7 @@ function PublicApp() {
     }
     return <ContactPage initialSafari={bookingSafari} bookings={bookings} content={publicContent} onStored={(booking) => setBookings((current) => current.some((item) => item.reference === booking.reference) ? current : [booking, ...current])} />;
   }, [page, postSlug, navigate, openPost, closePost, publicContent.homeStatement, publicContent.conservationStatement, publicContent.contactEmail, bookingSafari, bookings]);
-  return <div className="app-shell"><a className="skip-link" href="#main-content">Skip to content</a><CustomCursor /><AnimatePresence>{loading && <Loader onComplete={completeLoader} />}</AnimatePresence>{!loading && <Header page={page} navigate={navigate} />}<AnimatePresence mode="wait">{!loading && <motion.main id="main-content" key={postSlug ? `journal-${postSlug}` : page} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.45 }}>{pageContent}<Footer navigate={navigate} /></motion.main>}</AnimatePresence><AnimatePresence>{selectedSafari && <ExperienceModal safari={selectedSafari} onClose={() => setSelectedSafari(null)} onBook={bookSafari} />}</AnimatePresence><AnimatePresence>{adminOpen && <AdminPanel bookings={bookings} onClose={() => setAdminOpen(false)} onBookings={setBookings} content={content} onContent={saveContent} />}</AnimatePresence></div>;
+  return <div className="app-shell"><a className="skip-link" href="#main-content">Skip to content</a><CustomCursor /><AnimatePresence>{loading && <Loader onComplete={completeLoader} />}</AnimatePresence>{!loading && <Header page={page} navigate={navigate} />}<AnimatePresence mode="wait">{!loading && <motion.main id="main-content" key={postSlug ? `journal-${postSlug}` : page} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.45 }}>{pageContent}<Footer navigate={navigate} /></motion.main>}</AnimatePresence><AnimatePresence>{selectedSafari && <ExperienceModal safari={selectedSafari} onClose={() => setSelectedSafari(null)} onBook={bookSafari} />}</AnimatePresence></div>;
 }
 
 function isAdminRoute() {

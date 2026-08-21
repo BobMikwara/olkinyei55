@@ -39,16 +39,19 @@ function MediaCard({ asset, onSelect, onEdit, onDelete, selected }: {
 
 function MediaEditor({ asset, onClose }: { asset: MediaAsset; onClose: () => void }) {
   const [form, setForm] = useState<MediaAsset>(asset);
+  const [busy, setBusy] = useState(false);
 
-  const save = () => {
-    store.actions.updateMedia(asset.id, form);
-    onClose();
+  const save = async () => {
+    setBusy(true);
+    const ok = await store.actions.updateMedia(asset.id, form);
+    setBusy(false);
+    if (ok) onClose();
   };
 
   return (
     <Modal open onClose={onClose} size="lg" title="Edit Media Asset" footer={<>
       <Button variant="ghost" onClick={onClose}>Cancel</Button>
-      <Button onClick={save}>Save changes</Button>
+      <Button loading={busy} onClick={() => void save()}>Save changes</Button>
     </>}>
       <div className="grid gap-5 md:grid-cols-[1fr_1fr]">
         <div>

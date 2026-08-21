@@ -69,6 +69,9 @@ const seedDestinations: Destination[] = [
   { id: "d3", slug: "maasai-mara", name: "Maasai Mara", country: "Kenya", coordinates: [39, 43], bestTime: "July to October", animal: "Lion", image: "https://images.pexels.com/photos/19281386/pexels-photo-19281386.jpeg?auto=compress&cs=tinysrgb&w=1600", gallery: ["https://images.pexels.com/photos/19281386/pexels-photo-19281386.jpeg?auto=compress&cs=tinysrgb&w=1600", "https://images.pexels.com/photos/15373901/pexels-photo-15373901.jpeg?auto=compress&cs=tinysrgb&w=1600"], description: "Golden plains, private conservancies and intimate access to the migration's northern reach.", longDescription: "The Maasai Mara is Kenya's most celebrated reserve, known for its density of predators and as the northern terminus of the Great Migration.", activities: ["Private conservancy drives", "Night drives", "Walking safari", "Balloon safari", "Maasai village visits"], featured: true, published: true, seo: { title: "Maasai Mara | Kenya", description: "Kenya's premier wildlife reserve and home to the Great Migration." }, createdAt: "2024-03-12T00:00:00Z", updatedAt: "2026-03-22T13:15:00Z" },
   { id: "d4", slug: "tarangire", name: "Tarangire", country: "Tanzania", coordinates: [58, 73], bestTime: "June to October", animal: "Elephant", image: "https://images.pexels.com/photos/30817409/pexels-photo-30817409.jpeg?auto=compress&cs=tinysrgb&w=1600", gallery: ["https://images.pexels.com/photos/30817409/pexels-photo-30817409.jpeg?auto=compress&cs=tinysrgb&w=1600"], description: "Baobab country, seasonal rivers and magnificent elephant families moving through dust.", longDescription: "Tarangire is a land of giants — ancient baobabs, great elephant herds, and the Tarangire River that draws them all together in the dry season.", activities: ["Elephant viewing", "Baobab walks", "Bird watching"], featured: true, published: true, seo: { title: "Tarangire National Park | Tanzania", description: "Baobab country and magnificent elephant herds." }, createdAt: "2024-03-12T00:00:00Z", updatedAt: "2026-01-10T08:45:00Z" },
   { id: "d5", slug: "amboseli", name: "Amboseli", country: "Kenya", coordinates: [65, 45], bestTime: "June to October", animal: "Elephant", image: "https://images.pexels.com/photos/30817409/pexels-photo-30817409.jpeg?auto=compress&cs=tinysrgb&w=1600", gallery: ["https://images.pexels.com/photos/30817409/pexels-photo-30817409.jpeg?auto=compress&cs=tinysrgb&w=1600"], description: "Ancient elephant paths under the snow-capped presence of Kilimanjaro.", longDescription: "Amboseli is the place where Kilimanjaro meets the plains — where ancient elephant matriarchs walk paths that have been used for generations.", activities: ["Elephant observation", "Kilimanjaro viewing", "Maasai cultural visits", "Nature walks"], featured: true, published: true, seo: { title: "Amboseli National Park | Kenya", description: "Ancient elephant herds against the backdrop of Kilimanjaro." }, createdAt: "2024-03-12T00:00:00Z", updatedAt: "2026-04-02T11:20:00Z" },
+  { id: "d6", slug: "lake-manyara", name: "Lake Manyara", country: "Tanzania", coordinates: [54, 70], bestTime: "June to September", animal: "Flamingo", image: "https://images.pexels.com/photos/7211289/pexels-photo-7211289.jpeg?auto=compress&cs=tinysrgb&w=1600", gallery: ["https://images.pexels.com/photos/7211289/pexels-photo-7211289.jpeg?auto=compress&cs=tinysrgb&w=1600"], description: "A forest-fringed lake beneath the Rift escarpment, alive with primates and birdlife.", longDescription: "A forest-fringed lake beneath the Rift escarpment.", activities: ["Bird watching", "Forest walks", "Hot springs"], featured: false, published: true, seo: { title: "Lake Manyara | Tanzania", description: "A forest-fringed lake alive with primates and birdlife." }, createdAt: "2024-03-12T00:00:00Z", updatedAt: "2026-01-20T09:00:00Z" },
+  { id: "d7", slug: "tsavo", name: "Tsavo", country: "Kenya", coordinates: [73, 54], bestTime: "June to October", animal: "Red elephant", image: "https://images.pexels.com/photos/32382771/pexels-photo-32382771.jpeg?auto=compress&cs=tinysrgb&w=1600", gallery: ["https://images.pexels.com/photos/32382771/pexels-photo-32382771.jpeg?auto=compress&cs=tinysrgb&w=1600"], description: "Vast, untamed and rust-red: Kenya at its most elemental and gloriously uncrowded.", longDescription: "Vast, untamed and rust-red.", activities: ["Game drives", "Walking safari", "Bird watching"], featured: false, published: true, seo: { title: "Tsavo | Kenya", description: "Kenya at its most elemental and gloriously uncrowded." }, createdAt: "2024-03-12T00:00:00Z", updatedAt: "2026-01-10T10:00:00Z" },
+  { id: "d8", slug: "kilimanjaro", name: "Mount Kilimanjaro", country: "Tanzania", coordinates: [68, 60], bestTime: "January to March", animal: "Colobus", image: "https://images.pexels.com/photos/7211289/pexels-photo-7211289.jpeg?auto=compress&cs=tinysrgb&w=1600", gallery: ["https://images.pexels.com/photos/7211289/pexels-photo-7211289.jpeg?auto=compress&cs=tinysrgb&w=1600"], description: "Glaciers above cloud forest, with private routes selected for time and acclimatisation.", longDescription: "Glaciers above cloud forest.", activities: ["Climbing routes", "Cloud forest walks", "Bird watching"], featured: false, published: true, seo: { title: "Mount Kilimanjaro | Tanzania", description: "Glaciers above cloud forest with private routes." }, createdAt: "2024-03-12T00:00:00Z", updatedAt: "2026-01-08T11:00:00Z" },
 ];
 
 const seedMedia: MediaAsset[] = [
@@ -173,12 +176,15 @@ type StoreState = {
   packages: SafariPackage[];
   publicPackages: SafariPackage[];
   destinations: Destination[];
+  publicDestinations: Destination[];
   media: MediaAsset[];
+  publicMedia: MediaAsset[];
   blogPosts: BlogPost[];
   publicBlogPosts: BlogPost[];
   testimonials: Testimonial[];
   publicTestimonials: Testimonial[];
   guides: Guide[];
+  publicGuides: Guide[];
   vehicles: Vehicle[];
   customers: Customer[];
   pages: PageSettings[];
@@ -205,40 +211,31 @@ function publicPackagesFromStaff(staff: SafariPackage[]): SafariPackage[] {
   return staff.filter((p) => p.published && !p.archived);
 }
 
-function loadState(): StoreState {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      const saved = JSON.parse(raw) as Partial<StoreState>;
-      const staffPackages = saved.packages ?? seedPackages;
-      return {
-        theme: saved.theme ?? "dark",
-        currentUserId: saved.currentUserId ?? null,
-        session: saved.session ?? null,
-        users: saved.users ?? seedUsers,
-        bookings: saved.bookings ?? seedBookings,
-        newBookingsCount: saved.newBookingsCount ?? 0,
-        packages: staffPackages,
-        publicPackages: publicPackagesFromStaff(staffPackages),
-        destinations: saved.destinations ?? seedDestinations,
-        media: saved.media ?? seedMedia,
-        blogPosts: saved.blogPosts ?? seedBlogPosts,
-        publicBlogPosts: seedBlogPosts,
-        testimonials: saved.testimonials ?? [],
-        publicTestimonials: [],
-        guides: saved.guides ?? seedGuides,
-        vehicles: saved.vehicles ?? seedVehicles,
-        customers: saved.customers ?? seedCustomers,
-        pages: saved.pages ?? seedPages,
-        publicPages: seedPages,
-        siteSettings: { ...seedSiteSettings, ...(saved.siteSettings ?? {}) },
-        publicSiteSettings: seedSiteSettings,
-        activity: saved.activity ?? seedActivity,
-        audit: saved.audit ?? [],
-        notifications: [],
-      };
-    }
-  } catch { /* fall through to defaults */ }
+function publicDestinationsFromStaff(staff: Destination[]): Destination[] {
+  return staff.filter((d) => d.published);
+}
+
+function publicGuidesFromStaff(staff: Guide[]): Guide[] {
+  return staff.filter((g) => g.status === "active");
+}
+
+function publicMediaFromStaff(staff: MediaAsset[]): MediaAsset[] {
+  return staff.filter((m) => !m.archived);
+}
+
+function publicBlogPostsFromStaff(staff: BlogPost[]): BlogPost[] {
+  return staff.filter((p) => p.status === "published");
+}
+
+function publicTestimonialsFromStaff(staff: Testimonial[]): Testimonial[] {
+  return staff.filter((t) => t.status === "approved");
+}
+
+/**
+ * The bundled default state. In cloud mode this is only the initial value the
+ * database then replaces; in demo mode it is the content store's baseline.
+ */
+function seedState(): StoreState {
   return {
     theme: "dark",
     currentUserId: null,
@@ -249,12 +246,15 @@ function loadState(): StoreState {
     packages: seedPackages,
     publicPackages: publicPackagesFromStaff(seedPackages),
     destinations: seedDestinations,
+    publicDestinations: publicDestinationsFromStaff(seedDestinations),
     media: seedMedia,
+    publicMedia: publicMediaFromStaff(seedMedia),
     blogPosts: seedBlogPosts,
-    publicBlogPosts: seedBlogPosts,
+    publicBlogPosts: publicBlogPostsFromStaff(seedBlogPosts),
     testimonials: [],
     publicTestimonials: [],
     guides: seedGuides,
+    publicGuides: publicGuidesFromStaff(seedGuides),
     vehicles: seedVehicles,
     customers: seedCustomers,
     pages: seedPages,
@@ -265,6 +265,82 @@ function loadState(): StoreState {
     audit: [],
     notifications: [],
   };
+}
+
+/**
+ * Loads persisted state. The behaviour is deliberately different depending on
+ * whether a cloud backend is configured:
+ *
+ *   Cloud configured  → the database is the single source of truth for every
+ *   CMS-managed collection. localStorage may only restore non-content
+ *   preferences (theme) and the session-restore hint; it can NEVER seed
+ *   content, because a stale local copy must not shadow newer database rows.
+ *
+ *   No cloud (demo)  → the documented design-review fallback persists content
+ *   in localStorage, and the public slices are derived from the staff slices
+ *   so a single edit still propagates to the public website in that mode.
+ */
+function loadState(): StoreState {
+  if (hasCloudBackend) {
+    let theme: Theme = "dark";
+    let currentUserId: string | null = null;
+    let session: Session | null = null;
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        const saved = JSON.parse(raw) as Partial<StoreState>;
+        theme = saved.theme ?? "dark";
+        currentUserId = saved.currentUserId ?? null;
+        session = saved.session ?? null;
+      }
+    } catch { /* ignore corrupt storage */ }
+    return { ...seedState(), theme, currentUserId, session };
+  }
+
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) {
+      const saved = JSON.parse(raw) as Partial<StoreState>;
+      const staffPackages = saved.packages ?? seedPackages;
+      const staffDestinations = saved.destinations ?? seedDestinations;
+      const staffMedia = saved.media ?? seedMedia;
+      const staffBlogPosts = saved.blogPosts ?? seedBlogPosts;
+      const staffTestimonials = saved.testimonials ?? [];
+      const staffGuides = saved.guides ?? seedGuides;
+      const staffPages = saved.pages ?? seedPages;
+      const staffSiteSettings = { ...seedSiteSettings, ...(saved.siteSettings ?? {}) };
+      return {
+        theme: saved.theme ?? "dark",
+        currentUserId: saved.currentUserId ?? null,
+        session: saved.session ?? null,
+        users: saved.users ?? seedUsers,
+        bookings: saved.bookings ?? seedBookings,
+        newBookingsCount: saved.newBookingsCount ?? 0,
+        packages: staffPackages,
+        publicPackages: publicPackagesFromStaff(staffPackages),
+        destinations: staffDestinations,
+        publicDestinations: publicDestinationsFromStaff(staffDestinations),
+        media: staffMedia,
+        publicMedia: publicMediaFromStaff(staffMedia),
+        blogPosts: staffBlogPosts,
+        publicBlogPosts: publicBlogPostsFromStaff(staffBlogPosts),
+        testimonials: staffTestimonials,
+        publicTestimonials: publicTestimonialsFromStaff(staffTestimonials),
+        guides: staffGuides,
+        publicGuides: publicGuidesFromStaff(staffGuides),
+        vehicles: saved.vehicles ?? seedVehicles,
+        customers: saved.customers ?? seedCustomers,
+        pages: staffPages,
+        publicPages: staffPages,
+        siteSettings: staffSiteSettings,
+        publicSiteSettings: staffSiteSettings,
+        activity: saved.activity ?? seedActivity,
+        audit: saved.audit ?? [],
+        notifications: [],
+      };
+    }
+  } catch { /* fall through to defaults */ }
+  return seedState();
 }
 
 // ============ Password strength (client UX only — Supabase enforces server-side) ============
@@ -404,19 +480,28 @@ function subscribeToBookingsAuthenticated(onRow: (booking: import("../data").Boo
 }
 
 window.addEventListener("storage", (event) => {
+  // With a cloud backend, Supabase Realtime + cloud reloads are the cross-tab
+  // transport for CMS content. A stale localStorage snapshot from another tab
+  // must never overwrite database-sourced state, so this listener is a no-op
+  // for content in cloud mode.
+  if (hasCloudBackend) return;
+
+  // Demo mode: localStorage is the content store, so propagate edits between
+  // tabs and re-derive every public slice from the staff slice.
   if (event.key === STORAGE_KEY && event.newValue) {
     try {
       const saved = JSON.parse(event.newValue) as Partial<StoreState>;
       state = {
         ...loadState(),
         ...saved,
-        // Without a cloud backend the CMS library is the source of truth, so
-        // re-derive the public set from the packages edited in another tab.
-        publicPackages: hasCloudBackend ? state.publicPackages : publicPackagesFromStaff(saved.packages ?? state.packages),
-        publicBlogPosts: state.publicBlogPosts,
-        publicTestimonials: state.publicTestimonials,
-        publicPages: state.publicPages,
-        publicSiteSettings: state.publicSiteSettings,
+        publicPackages: publicPackagesFromStaff(saved.packages ?? state.packages),
+        publicDestinations: publicDestinationsFromStaff(saved.destinations ?? state.destinations),
+        publicMedia: publicMediaFromStaff(saved.media ?? state.media),
+        publicBlogPosts: publicBlogPostsFromStaff(saved.blogPosts ?? state.blogPosts),
+        publicTestimonials: publicTestimonialsFromStaff(saved.testimonials ?? state.testimonials),
+        publicGuides: publicGuidesFromStaff(saved.guides ?? state.guides),
+        publicPages: saved.pages ?? state.pages,
+        publicSiteSettings: saved.siteSettings ?? state.siteSettings,
         notifications: state.notifications,
       };
       listeners.forEach((listener) => listener());
@@ -424,17 +509,20 @@ window.addEventListener("storage", (event) => {
     return;
   }
   // The public booking form writes here — pull submissions into the CMS in
-  // real time when both apps run in the same browser.
+  // real time when both apps run in the same browser (demo mode only).
   if (event.key === PUBLIC_BOOKINGS_KEY && event.newValue) {
     mergeExternalBookings(readPublicSubmissions());
   }
 });
 
-function persistedStateSnapshot(current: StoreState): Omit<StoreState, "publicPackages" | "publicBlogPosts" | "publicTestimonials" | "publicPages" | "publicSiteSettings" | "notifications"> {
+function persistedStateSnapshot(current: StoreState): Omit<StoreState, "publicPackages" | "publicDestinations" | "publicMedia" | "publicBlogPosts" | "publicTestimonials" | "publicGuides" | "publicPages" | "publicSiteSettings" | "notifications"> {
   const {
     publicPackages: _publicPackages,
+    publicDestinations: _publicDestinations,
+    publicMedia: _publicMedia,
     publicBlogPosts: _publicBlogPosts,
     publicTestimonials: _publicTestimonials,
+    publicGuides: _publicGuides,
     publicPages: _publicPages,
     publicSiteSettings: _publicSiteSettings,
     notifications: _notifications,
@@ -767,12 +855,62 @@ if (typeof window !== "undefined") {
       .on("postgres_changes", { event: "DELETE", schema: "public", table: "packages" }, (payload) => {
         applyPackageRealtime("DELETE", payload.old);
       })
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "destinations" }, (payload) => {
+        applyDestinationRealtime("INSERT", payload.new);
+      })
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "destinations" }, (payload) => {
+        applyDestinationRealtime("UPDATE", payload.new);
+      })
+      .on("postgres_changes", { event: "DELETE", schema: "public", table: "destinations" }, (payload) => {
+        applyDestinationRealtime("DELETE", payload.old);
+      })
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "guides" }, (payload) => {
+        applyGuideRealtime("INSERT", payload.new);
+      })
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "guides" }, (payload) => {
+        applyGuideRealtime("UPDATE", payload.new);
+      })
+      .on("postgres_changes", { event: "DELETE", schema: "public", table: "guides" }, (payload) => {
+        applyGuideRealtime("DELETE", payload.old);
+      })
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "vehicles" }, (payload) => {
+        applyVehicleRealtime("INSERT", payload.new);
+      })
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "vehicles" }, (payload) => {
+        applyVehicleRealtime("UPDATE", payload.new);
+      })
+      .on("postgres_changes", { event: "DELETE", schema: "public", table: "vehicles" }, (payload) => {
+        applyVehicleRealtime("DELETE", payload.old);
+      })
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "customers" }, (payload) => {
+        applyCustomerRealtime("INSERT", payload.new);
+      })
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "customers" }, (payload) => {
+        applyCustomerRealtime("UPDATE", payload.new);
+      })
+      .on("postgres_changes", { event: "DELETE", schema: "public", table: "customers" }, (payload) => {
+        applyCustomerRealtime("DELETE", payload.old);
+      })
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "media_assets" }, (payload) => {
+        applyMediaRealtime("INSERT", payload.new);
+      })
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "media_assets" }, (payload) => {
+        applyMediaRealtime("UPDATE", payload.new);
+      })
+      .on("postgres_changes", { event: "DELETE", schema: "public", table: "media_assets" }, (payload) => {
+        applyMediaRealtime("DELETE", payload.old);
+      })
       .subscribe();
 
     void loadCloudCmsContent();
     void loadCloudBlogPosts();
     void loadCloudTestimonials();
     void loadCloudPackages();
+    void loadCloudDestinations();
+    void loadCloudGuides();
+    void loadCloudVehicles();
+    void loadCloudCustomers();
+    void loadCloudMedia();
   }
 
   if (supabasePublic) {
@@ -810,12 +948,42 @@ if (typeof window !== "undefined") {
       .on("postgres_changes", { event: "DELETE", schema: "public", table: "packages" }, (payload) => {
         applyPublicPackageRealtime("DELETE", payload.old);
       })
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "destinations" }, (payload) => {
+        applyPublicDestinationRealtime("INSERT", payload.new);
+      })
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "destinations" }, (payload) => {
+        applyPublicDestinationRealtime("UPDATE", payload.new);
+      })
+      .on("postgres_changes", { event: "DELETE", schema: "public", table: "destinations" }, (payload) => {
+        applyPublicDestinationRealtime("DELETE", payload.old);
+      })
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "guides" }, (payload) => {
+        applyPublicGuideRealtime("INSERT", payload.new);
+      })
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "guides" }, (payload) => {
+        applyPublicGuideRealtime("UPDATE", payload.new);
+      })
+      .on("postgres_changes", { event: "DELETE", schema: "public", table: "guides" }, (payload) => {
+        applyPublicGuideRealtime("DELETE", payload.old);
+      })
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "media_assets" }, (payload) => {
+        applyPublicMediaRealtime("INSERT", payload.new);
+      })
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "media_assets" }, (payload) => {
+        applyPublicMediaRealtime("UPDATE", payload.new);
+      })
+      .on("postgres_changes", { event: "DELETE", schema: "public", table: "media_assets" }, (payload) => {
+        applyPublicMediaRealtime("DELETE", payload.old);
+      })
       .subscribe();
 
     void loadPublicCmsContent();
     void loadPublicBlogPosts();
     void loadPublicTestimonials();
     void loadPublicPackages();
+    void loadPublicDestinations();
+    void loadPublicGuides();
+    void loadPublicMedia();
   }
 }
 
@@ -1293,6 +1461,751 @@ function applyPublicTestimonialRealtime(action: "INSERT" | "UPDATE" | "DELETE", 
   emit();
 }
 
+// ============ Destinations (public.destinations) ============
+// Public-facing: the website's map and destination pages read these rows.
+
+type DbDestinationRow = {
+  id: string;
+  slug: string;
+  name: string;
+  country: string;
+  coordinates: [number, number] | null;
+  best_time: string | null;
+  animal: string | null;
+  image: string;
+  gallery: string[] | null;
+  description: string;
+  long_description: string | null;
+  activities: string[] | null;
+  featured: boolean | null;
+  published: boolean | null;
+  seo_title: string | null;
+  seo_description: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+};
+
+function destinationFromRow(row: DbDestinationRow): Destination {
+  const createdAt = row.created_at ?? row.updated_at ?? new Date().toISOString();
+  return {
+    id: row.id,
+    slug: row.slug,
+    name: row.name,
+    country: row.country === "Kenya" ? "Kenya" : "Tanzania",
+    coordinates: (row.coordinates ?? [0, 0]) as [number, number],
+    bestTime: row.best_time ?? "",
+    animal: row.animal ?? "",
+    image: row.image ?? "",
+    gallery: asStringArray(row.gallery),
+    description: row.description ?? "",
+    longDescription: row.long_description ?? "",
+    activities: asStringArray(row.activities),
+    featured: Boolean(row.featured),
+    published: Boolean(row.published),
+    seo: { title: row.seo_title ?? row.name, description: row.seo_description ?? row.description ?? "" },
+    createdAt,
+    updatedAt: row.updated_at ?? createdAt,
+  };
+}
+
+function destinationToRow(d: Destination): Record<string, unknown> {
+  return {
+    slug: d.slug,
+    name: d.name,
+    country: d.country,
+    coordinates: d.coordinates,
+    best_time: d.bestTime,
+    animal: d.animal,
+    image: d.image,
+    gallery: d.gallery,
+    description: d.description,
+    long_description: d.longDescription,
+    activities: d.activities,
+    featured: d.featured,
+    published: d.published,
+    seo_title: d.seo.title,
+    seo_description: d.seo.description,
+  };
+}
+
+// ============ Guides (public.guides) ============
+
+type DbGuideRow = {
+  id: string;
+  slug: string | null;
+  name: string;
+  title: string | null;
+  speciality: string;
+  bio: string;
+  portrait_url: string;
+  gallery: string[] | null;
+  languages: string[] | null;
+  years_in_field: number | null;
+  locations: string[] | null;
+  rating: number | null;
+  assignments: number | null;
+  availability: Record<string, string> | null;
+  active: boolean | null;
+  archived: boolean | null;
+  email: string | null;
+  phone: string | null;
+  created_at: string | null;
+};
+
+function guideFromRow(row: DbGuideRow): Guide {
+  return {
+    id: row.id,
+    name: row.name,
+    slug: row.slug ?? row.name.toLowerCase().replace(/[^a-z0-9]+/g, "-"),
+    title: row.title ?? "",
+    bio: row.bio ?? "",
+    portrait: row.portrait_url ?? "",
+    gallery: asStringArray(row.gallery),
+    languages: asStringArray(row.languages),
+    speciality: row.speciality ?? "",
+    yearsInField: row.years_in_field ?? 0,
+    locations: asStringArray(row.locations),
+    rating: Number(row.rating ?? 5),
+    assignments: row.assignments ?? 0,
+    availability: (row.availability ?? {}) as Guide["availability"],
+    status: row.active === false ? "inactive" : "active",
+    email: row.email ?? "",
+    phone: row.phone ?? "",
+    createdAt: row.created_at ?? new Date().toISOString(),
+  };
+}
+
+function guideToRow(g: Guide): Record<string, unknown> {
+  return {
+    slug: g.slug,
+    name: g.name,
+    title: g.title,
+    speciality: g.speciality,
+    bio: g.bio,
+    portrait_url: g.portrait,
+    gallery: g.gallery,
+    languages: g.languages,
+    years_in_field: g.yearsInField,
+    locations: g.locations,
+    rating: g.rating,
+    assignments: g.assignments,
+    availability: g.availability,
+    active: g.status === "active",
+    email: g.email,
+    phone: g.phone,
+  };
+}
+
+// ============ Vehicles (public.vehicles) ============
+
+type DbVehicleRow = {
+  id: string;
+  fleet_code: string;
+  model: string;
+  type: string | null;
+  base: string;
+  capacity: number | null;
+  status: string;
+  image: string | null;
+  driver_id: string | null;
+  last_service: string | null;
+  next_service: string | null;
+  insurance: string | null;
+  mileage: number | null;
+  notes: string | null;
+  archived: boolean | null;
+  created_at: string | null;
+};
+
+function vehicleFromRow(row: DbVehicleRow): Vehicle {
+  return {
+    id: row.id,
+    fleetCode: row.fleet_code,
+    model: row.model,
+    type: (row.type as Vehicle["type"]) ?? "Land Cruiser",
+    base: row.base,
+    capacity: row.capacity ?? 6,
+    status: (row.status as Vehicle["status"]) ?? "Ready",
+    image: row.image ?? undefined,
+    driverId: row.driver_id ?? undefined,
+    lastService: row.last_service ?? "",
+    nextService: row.next_service ?? "",
+    insurance: row.insurance ?? "",
+    mileage: row.mileage ?? 0,
+    notes: row.notes ?? "",
+    createdAt: row.created_at ?? new Date().toISOString(),
+  };
+}
+
+function vehicleToRow(v: Vehicle): Record<string, unknown> {
+  return {
+    fleet_code: v.fleetCode,
+    model: v.model,
+    type: v.type,
+    base: v.base,
+    capacity: v.capacity,
+    status: v.status,
+    image: v.image ?? null,
+    driver_id: v.driverId ?? null,
+    last_service: v.lastService || null,
+    next_service: v.nextService || null,
+    insurance: v.insurance,
+    mileage: v.mileage,
+    notes: v.notes,
+  };
+}
+
+// ============ Customers (public.customers) ============
+
+type DbCustomerRow = {
+  id: string;
+  name: string;
+  email: string;
+  phone: string | null;
+  country: string | null;
+  avatar: string | null;
+  notes: string | null;
+  tags: string[] | null;
+  total_bookings: number | null;
+  total_spent: number | null;
+  lifetime_value: string | null;
+  first_trip: string | null;
+  last_trip: string | null;
+  wishlist: string[] | null;
+  archived: boolean | null;
+  created_at: string | null;
+  updated_at: string | null;
+};
+
+function customerFromRow(row: DbCustomerRow): Customer {
+  return {
+    id: row.id,
+    name: row.name,
+    email: row.email,
+    phone: row.phone ?? "",
+    country: row.country ?? "",
+    avatar: row.avatar ?? "",
+    totalBookings: row.total_bookings ?? 0,
+    totalSpent: row.total_spent ?? 0,
+    lifetimeValue: (row.lifetime_value as Customer["lifetimeValue"]) ?? "New",
+    firstTrip: row.first_trip ?? "",
+    lastTrip: row.last_trip ?? "",
+    notes: row.notes ?? "",
+    wishlist: asStringArray(row.wishlist),
+    tags: asStringArray(row.tags),
+    createdAt: row.created_at ?? new Date().toISOString(),
+  };
+}
+
+function customerToRow(c: Customer): Record<string, unknown> {
+  return {
+    name: c.name,
+    email: c.email,
+    phone: c.phone,
+    country: c.country,
+    avatar: c.avatar,
+    notes: c.notes,
+    tags: c.tags,
+    total_bookings: c.totalBookings,
+    total_spent: c.totalSpent,
+    lifetime_value: c.lifetimeValue,
+    first_trip: c.firstTrip || null,
+    last_trip: c.lastTrip || null,
+    wishlist: c.wishlist,
+  };
+}
+
+// ============ Media assets (public.media_assets) ============
+
+type DbMediaRow = {
+  id: string;
+  url: string;
+  thumbnail: string | null;
+  type: string;
+  name: string;
+  alt: string;
+  category: string;
+  tags: string[] | null;
+  size: number | null;
+  dimensions: { width: number; height: number } | null;
+  duration: number | null;
+  copyright: string | null;
+  uploaded_by: string | null;
+  folder: string | null;
+  published: boolean | null;
+  archived: boolean | null;
+  created_at: string | null;
+};
+
+function mediaFromRow(row: DbMediaRow): MediaAsset {
+  return {
+    id: row.id,
+    url: row.url,
+    thumbnail: row.thumbnail ?? row.url,
+    type: (row.type as MediaAsset["type"]) ?? "image",
+    name: row.name,
+    alt: row.alt ?? "",
+    category: row.category ?? "Uncategorized",
+    tags: asStringArray(row.tags),
+    size: row.size ?? 0,
+    dimensions: row.dimensions ?? undefined,
+    duration: row.duration ?? undefined,
+    copyright: row.copyright ?? "",
+    uploadedBy: row.uploaded_by ?? "",
+    createdAt: row.created_at ?? new Date().toISOString(),
+    folder: row.folder ?? "Uploads",
+    archived: Boolean(row.archived),
+  };
+}
+
+function mediaToRow(m: MediaAsset): Record<string, unknown> {
+  return {
+    url: m.url,
+    thumbnail: m.thumbnail,
+    type: m.type,
+    name: m.name,
+    alt: m.alt,
+    category: m.category,
+    tags: m.tags,
+    size: m.size,
+    dimensions: m.dimensions ?? null,
+    duration: m.duration ?? null,
+    copyright: m.copyright,
+    uploaded_by: m.uploadedBy,
+    folder: m.folder,
+    archived: Boolean(m.archived),
+  };
+}
+
+// ============ Shared cloud write helpers ============
+
+/**
+ * Upserts a row into a Supabase table, minting the database id when the local
+ * record predates the cloud (seed ids like "d1" are not valid uuids).
+ * Rejects with a descriptive message so the caller can surface a truthful
+ * save state rather than a false "saved".
+ */
+async function cloudUpsertByIdOrUnique(table: string, uniqueColumn: string, id: string, rowWithoutId: Record<string, unknown>): Promise<string> {
+  const client = supabase;
+  if (!client) throw new Error("Cloud database is not configured.");
+  const isUuid = UUID_PATTERN.test(id);
+  if (isUuid) {
+    const { data, error } = await client.from(table).upsert({ ...rowWithoutId, id }, { onConflict: "id" }).select("id").single();
+    if (error) throw new Error(error.message);
+    return (data as { id: string }).id;
+  }
+  // Tables without a natural unique key (e.g. media_assets) insert fresh so
+  // Postgres mints the uuid rather than upserting on a non-existent column.
+  if (uniqueColumn === "id") {
+    const { data, error } = await client.from(table).insert(rowWithoutId).select("id").single();
+    if (error) throw new Error(error.message);
+    return (data as { id: string }).id;
+  }
+  const { data, error } = await client.from(table).upsert(rowWithoutId, { onConflict: uniqueColumn }).select("id").single();
+  if (error) throw new Error(error.message);
+  return (data as { id: string }).id;
+}
+
+/** After a write, re-read the public slice so the website converges immediately. */
+async function refreshPublicCollectionAfterWrite(reset: () => void, loader: (options: { force: boolean; requireSuccess: boolean }) => Promise<void>): Promise<void> {
+  reset();
+  try {
+    await loader({ force: true, requireSuccess: true });
+  } catch (error) {
+    if (import.meta.env.DEV) {
+      console.warn("[Olkinyei] saved but public collection refresh failed:", error instanceof Error ? error.message : error);
+    }
+  }
+}
+
+// ============ Destinations sync ============
+
+let destinationsBootstrapped = false;
+let publicDestinationsBootstrapped = false;
+
+async function loadCloudDestinations(options: { force?: boolean } = {}): Promise<void> {
+  const client = supabase;
+  if (!client || (destinationsBootstrapped && !options.force)) return;
+  destinationsBootstrapped = true;
+  try {
+    const { data, error } = await client.from("destinations").select("*").order("name", { ascending: true });
+    if (error) throw new Error(error.message);
+    if (!data || data.length === 0) return;
+    state = { ...state, destinations: (data as DbDestinationRow[]).map(destinationFromRow) };
+    emit();
+    if (import.meta.env.DEV) console.debug(`[Olkinyei] Destinations synced (staff): ${data.length}`);
+  } catch (error) {
+    destinationsBootstrapped = false;
+    console.error(
+      "[Olkinyei] Could not load destinations from Supabase:",
+      error instanceof Error ? error.message : error,
+      "\nRun supabase/cms_global_sync.sql, then confirm anonymous SELECT is permitted on public.destinations.",
+    );
+  }
+}
+
+async function loadPublicDestinations(options: { force?: boolean; requireSuccess?: boolean } = {}): Promise<void> {
+  const client = supabasePublic;
+  if (!client || (publicDestinationsBootstrapped && !options.force)) return;
+  publicDestinationsBootstrapped = true;
+  try {
+    const { data, error } = await client.from("destinations").select("*").order("name", { ascending: true });
+    if (error) throw new Error(error.message);
+    state = { ...state, publicDestinations: (data as DbDestinationRow[] | null)?.map(destinationFromRow) ?? [] };
+    emit();
+  } catch (error) {
+    publicDestinationsBootstrapped = false;
+    if (options.requireSuccess) throw error;
+    if (import.meta.env.DEV) console.warn("[Olkinyei] Could not load public destinations:", error instanceof Error ? error.message : error);
+  }
+}
+
+function applyDestinationRealtime(action: "INSERT" | "UPDATE" | "DELETE", row: unknown) {
+  if (!row || typeof row !== "object") return;
+  const rec = row as DbDestinationRow;
+  if (action === "DELETE") {
+    state = { ...state, destinations: state.destinations.filter((d) => d.id !== rec.id) };
+    emit();
+    return;
+  }
+  const next = destinationFromRow(rec);
+  const exists = state.destinations.some((d) => d.id === next.id);
+  state = { ...state, destinations: exists ? state.destinations.map((d) => (d.id === next.id ? next : d)) : [next, ...state.destinations] };
+  emit();
+}
+
+function applyPublicDestinationRealtime(action: "INSERT" | "UPDATE" | "DELETE", row: unknown) {
+  if (!row || typeof row !== "object") return;
+  const rec = row as DbDestinationRow;
+  if (action === "DELETE") {
+    state = { ...state, publicDestinations: state.publicDestinations.filter((d) => d.id !== rec.id) };
+    emit();
+    return;
+  }
+  const next = destinationFromRow(rec);
+  const exists = state.publicDestinations.some((d) => d.id === next.id);
+  state = { ...state, publicDestinations: exists ? state.publicDestinations.map((d) => (d.id === next.id ? next : d)) : [next, ...state.publicDestinations] };
+  emit();
+}
+
+async function destinationCloudSave(d: Destination): Promise<void> {
+  const client = supabase;
+  if (!client) {
+    state = { ...state, publicDestinations: publicDestinationsFromStaff(state.destinations) };
+    emit();
+    return;
+  }
+  try {
+    const cloudId = await cloudUpsertByIdOrUnique("destinations", "slug", d.id, destinationToRow(d));
+    if (cloudId !== d.id) {
+      state = { ...state, destinations: state.destinations.map((x) => (x.id === d.id ? { ...x, id: cloudId } : x)) };
+      emit();
+    }
+    await refreshPublicCollectionAfterWrite(
+      () => { publicDestinationsBootstrapped = false; },
+      loadPublicDestinations,
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`The database rejected the change: ${message.slice(0, 160)}`);
+  }
+}
+
+async function destinationCloudDelete(id: string): Promise<void> {
+  const client = supabase;
+  if (!client) {
+    state = { ...state, publicDestinations: publicDestinationsFromStaff(state.destinations) };
+    emit();
+    return;
+  }
+  if (!UUID_PATTERN.test(id)) return;
+  const { error } = await client.from("destinations").delete().eq("id", id);
+  if (error) throw new Error(error.message);
+  await refreshPublicCollectionAfterWrite(
+    () => { publicDestinationsBootstrapped = false; },
+    loadPublicDestinations,
+  );
+}
+
+// ============ Guides sync ============
+
+let guidesBootstrapped = false;
+let publicGuidesBootstrapped = false;
+
+async function loadCloudGuides(options: { force?: boolean } = {}): Promise<void> {
+  const client = supabase;
+  if (!client || (guidesBootstrapped && !options.force)) return;
+  guidesBootstrapped = true;
+  try {
+    const { data, error } = await client.from("guides").select("*").order("name", { ascending: true });
+    if (error) throw new Error(error.message);
+    if (!data || data.length === 0) return;
+    state = { ...state, guides: (data as DbGuideRow[]).map(guideFromRow) };
+    emit();
+    if (import.meta.env.DEV) console.debug(`[Olkinyei] Guides synced (staff): ${data.length}`);
+  } catch (error) {
+    guidesBootstrapped = false;
+    console.error(
+      "[Olkinyei] Could not load guides from Supabase:",
+      error instanceof Error ? error.message : error,
+      "\nRun supabase/cms_global_sync.sql, then confirm anonymous SELECT is permitted on public.guides.",
+    );
+  }
+}
+
+async function loadPublicGuides(options: { force?: boolean; requireSuccess?: boolean } = {}): Promise<void> {
+  const client = supabasePublic;
+  if (!client || (publicGuidesBootstrapped && !options.force)) return;
+  publicGuidesBootstrapped = true;
+  try {
+    const { data, error } = await client.from("guides").select("*").order("name", { ascending: true });
+    if (error) throw new Error(error.message);
+    state = { ...state, publicGuides: (data as DbGuideRow[] | null)?.map(guideFromRow) ?? [] };
+    emit();
+  } catch (error) {
+    publicGuidesBootstrapped = false;
+    if (options.requireSuccess) throw error;
+    if (import.meta.env.DEV) console.warn("[Olkinyei] Could not load public guides:", error instanceof Error ? error.message : error);
+  }
+}
+
+function applyGuideRealtime(action: "INSERT" | "UPDATE" | "DELETE", row: unknown) {
+  if (!row || typeof row !== "object") return;
+  const rec = row as DbGuideRow;
+  if (action === "DELETE") {
+    state = { ...state, guides: state.guides.filter((g) => g.id !== rec.id) };
+    emit();
+    return;
+  }
+  const next = guideFromRow(rec);
+  const exists = state.guides.some((g) => g.id === next.id);
+  state = { ...state, guides: exists ? state.guides.map((g) => (g.id === next.id ? next : g)) : [next, ...state.guides] };
+  emit();
+}
+
+function applyPublicGuideRealtime(action: "INSERT" | "UPDATE" | "DELETE", row: unknown) {
+  if (!row || typeof row !== "object") return;
+  const rec = row as DbGuideRow;
+  if (action === "DELETE") {
+    state = { ...state, publicGuides: state.publicGuides.filter((g) => g.id !== rec.id) };
+    emit();
+    return;
+  }
+  const next = guideFromRow(rec);
+  const exists = state.publicGuides.some((g) => g.id === next.id);
+  state = { ...state, publicGuides: exists ? state.publicGuides.map((g) => (g.id === next.id ? next : g)) : [next, ...state.publicGuides] };
+  emit();
+}
+
+async function guideCloudSave(g: Guide): Promise<void> {
+  const client = supabase;
+  if (!client) {
+    state = { ...state, publicGuides: publicGuidesFromStaff(state.guides) };
+    emit();
+    return;
+  }
+  try {
+    const cloudId = await cloudUpsertByIdOrUnique("guides", "slug", g.id, guideToRow(g));
+    if (cloudId !== g.id) {
+      state = { ...state, guides: state.guides.map((x) => (x.id === g.id ? { ...x, id: cloudId } : x)) };
+      emit();
+    }
+    await refreshPublicCollectionAfterWrite(
+      () => { publicGuidesBootstrapped = false; },
+      loadPublicGuides,
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`The database rejected the change: ${message.slice(0, 160)}`);
+  }
+}
+
+// ============ Vehicles sync (staff only — not public) ============
+
+let vehiclesBootstrapped = false;
+
+async function loadCloudVehicles(options: { force?: boolean } = {}): Promise<void> {
+  const client = supabase;
+  if (!client || (vehiclesBootstrapped && !options.force)) return;
+  vehiclesBootstrapped = true;
+  try {
+    const { data, error } = await client.from("vehicles").select("*").order("fleet_code", { ascending: true });
+    if (error) throw new Error(error.message);
+    if (!data || data.length === 0) return;
+    state = { ...state, vehicles: (data as DbVehicleRow[]).map(vehicleFromRow) };
+    emit();
+  } catch (error) {
+    vehiclesBootstrapped = false;
+    if (import.meta.env.DEV) console.warn("[Olkinyei] Could not load vehicles:", error instanceof Error ? error.message : error);
+  }
+}
+
+function applyVehicleRealtime(action: "INSERT" | "UPDATE" | "DELETE", row: unknown) {
+  if (!row || typeof row !== "object") return;
+  const rec = row as DbVehicleRow;
+  if (action === "DELETE") {
+    state = { ...state, vehicles: state.vehicles.filter((v) => v.id !== rec.id) };
+    emit();
+    return;
+  }
+  const next = vehicleFromRow(rec);
+  const exists = state.vehicles.some((v) => v.id === next.id);
+  state = { ...state, vehicles: exists ? state.vehicles.map((v) => (v.id === next.id ? next : v)) : [next, ...state.vehicles] };
+  emit();
+}
+
+async function vehicleCloudSave(v: Vehicle): Promise<void> {
+  const client = supabase;
+  if (!client) return;
+  try {
+    const cloudId = await cloudUpsertByIdOrUnique("vehicles", "fleet_code", v.id, vehicleToRow(v));
+    if (cloudId !== v.id) {
+      state = { ...state, vehicles: state.vehicles.map((x) => (x.id === v.id ? { ...x, id: cloudId } : x)) };
+      emit();
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`The database rejected the change: ${message.slice(0, 160)}`);
+  }
+}
+
+// ============ Customers sync (staff only — not public) ============
+
+let customersBootstrapped = false;
+
+async function loadCloudCustomers(options: { force?: boolean } = {}): Promise<void> {
+  const client = supabase;
+  if (!client || (customersBootstrapped && !options.force)) return;
+  customersBootstrapped = true;
+  try {
+    const { data, error } = await client.from("customers").select("*").order("name", { ascending: true });
+    if (error) throw new Error(error.message);
+    if (!data || data.length === 0) return;
+    state = { ...state, customers: (data as DbCustomerRow[]).map(customerFromRow) };
+    emit();
+  } catch (error) {
+    customersBootstrapped = false;
+    if (import.meta.env.DEV) console.warn("[Olkinyei] Could not load customers:", error instanceof Error ? error.message : error);
+  }
+}
+
+function applyCustomerRealtime(action: "INSERT" | "UPDATE" | "DELETE", row: unknown) {
+  if (!row || typeof row !== "object") return;
+  const rec = row as DbCustomerRow;
+  if (action === "DELETE") {
+    state = { ...state, customers: state.customers.filter((c) => c.id !== rec.id) };
+    emit();
+    return;
+  }
+  const next = customerFromRow(rec);
+  const exists = state.customers.some((c) => c.id === next.id);
+  state = { ...state, customers: exists ? state.customers.map((c) => (c.id === next.id ? next : c)) : [next, ...state.customers] };
+  emit();
+}
+
+async function customerCloudSave(c: Customer): Promise<void> {
+  const client = supabase;
+  if (!client) return;
+  try {
+    const cloudId = await cloudUpsertByIdOrUnique("customers", "email", c.id, customerToRow(c));
+    if (cloudId !== c.id) {
+      state = { ...state, customers: state.customers.map((x) => (x.id === c.id ? { ...x, id: cloudId } : x)) };
+      emit();
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`The database rejected the change: ${message.slice(0, 160)}`);
+  }
+}
+
+// ============ Media sync ============
+
+let mediaBootstrapped = false;
+let publicMediaBootstrapped = false;
+
+async function loadCloudMedia(options: { force?: boolean } = {}): Promise<void> {
+  const client = supabase;
+  if (!client || (mediaBootstrapped && !options.force)) return;
+  mediaBootstrapped = true;
+  try {
+    const { data, error } = await client.from("media_assets").select("*").order("created_at", { ascending: false });
+    if (error) throw new Error(error.message);
+    if (!data || data.length === 0) return;
+    state = { ...state, media: (data as DbMediaRow[]).map(mediaFromRow) };
+    emit();
+  } catch (error) {
+    mediaBootstrapped = false;
+    if (import.meta.env.DEV) console.warn("[Olkinyei] Could not load media:", error instanceof Error ? error.message : error);
+  }
+}
+
+async function loadPublicMedia(options: { force?: boolean; requireSuccess?: boolean } = {}): Promise<void> {
+  const client = supabasePublic;
+  if (!client || (publicMediaBootstrapped && !options.force)) return;
+  publicMediaBootstrapped = true;
+  try {
+    const { data, error } = await client.from("media_assets").select("*").order("created_at", { ascending: false });
+    if (error) throw new Error(error.message);
+    state = { ...state, publicMedia: (data as DbMediaRow[] | null)?.map(mediaFromRow) ?? [] };
+    emit();
+  } catch (error) {
+    publicMediaBootstrapped = false;
+    if (options.requireSuccess) throw error;
+    if (import.meta.env.DEV) console.warn("[Olkinyei] Could not load public media:", error instanceof Error ? error.message : error);
+  }
+}
+
+function applyMediaRealtime(action: "INSERT" | "UPDATE" | "DELETE", row: unknown) {
+  if (!row || typeof row !== "object") return;
+  const rec = row as DbMediaRow;
+  if (action === "DELETE") {
+    state = { ...state, media: state.media.filter((m) => m.id !== rec.id) };
+    emit();
+    return;
+  }
+  const next = mediaFromRow(rec);
+  const exists = state.media.some((m) => m.id === next.id);
+  state = { ...state, media: exists ? state.media.map((m) => (m.id === next.id ? next : m)) : [next, ...state.media] };
+  emit();
+}
+
+function applyPublicMediaRealtime(action: "INSERT" | "UPDATE" | "DELETE", row: unknown) {
+  if (!row || typeof row !== "object") return;
+  const rec = row as DbMediaRow;
+  if (action === "DELETE") {
+    state = { ...state, publicMedia: state.publicMedia.filter((m) => m.id !== rec.id) };
+    emit();
+    return;
+  }
+  const next = mediaFromRow(rec);
+  const exists = state.publicMedia.some((m) => m.id === next.id);
+  state = { ...state, publicMedia: exists ? state.publicMedia.map((m) => (m.id === next.id ? next : m)) : [next, ...state.publicMedia] };
+  emit();
+}
+
+async function mediaCloudSave(m: MediaAsset): Promise<void> {
+  const client = supabase;
+  if (!client) {
+    state = { ...state, publicMedia: publicMediaFromStaff(state.media) };
+    emit();
+    return;
+  }
+  try {
+    const cloudId = await cloudUpsertByIdOrUnique("media_assets", "id", m.id, mediaToRow(m));
+    if (cloudId !== m.id) {
+      state = { ...state, media: state.media.map((x) => (x.id === m.id ? { ...x, id: cloudId } : x)) };
+      emit();
+    }
+    await refreshPublicCollectionAfterWrite(
+      () => { publicMediaBootstrapped = false; },
+      loadPublicMedia,
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`The database rejected the change: ${message.slice(0, 160)}`);
+  }
+}
+
 // Writes keep Supabase as the source of truth. Failures are reported, never
 // swallowed, so a broken sync can't masquerade as a successful save.
 function blogCloudSave(post: BlogPost | null, deletedId?: string): void {
@@ -1557,10 +2470,20 @@ const actions = {
     testimonialsBootstrapped = false;
     packagesBootstrapped = false;
     blogBootstrapped = false;
+    destinationsBootstrapped = false;
+    guidesBootstrapped = false;
+    vehiclesBootstrapped = false;
+    customersBootstrapped = false;
+    mediaBootstrapped = false;
     await Promise.all([
       loadCloudTestimonials(),
       loadCloudPackages(),
       loadCloudBlogPosts(),
+      loadCloudDestinations(),
+      loadCloudGuides(),
+      loadCloudVehicles(),
+      loadCloudCustomers(),
+      loadCloudMedia(),
     ]);
   },
 
@@ -1786,7 +2709,9 @@ const actions = {
     const quiet = !announce;
 
     // 1. Same-browser bridge: the public booking form's local submissions.
-    const localAdded = mergeExternalBookings(readPublicSubmissions(), { quiet });
+    //    Only relevant in demo mode — with a cloud backend the database is the
+    //    single source of truth and Realtime delivers new bookings directly.
+    const localAdded = hasCloudBackend ? [] : mergeExternalBookings(readPublicSubmissions(), { quiet });
 
     // 2. Cloud source of truth (cross-device). Ordered newest first.
     let cloudAdded: Booking[] = [];
@@ -1965,54 +2890,113 @@ const actions = {
   },
 
   // Destinations
-  createDestination(d: Omit<Destination, "id" | "createdAt" | "updatedAt" | "slug">) {
-    const id = uid();
+  async createDestination(d: Omit<Destination, "id" | "createdAt" | "updatedAt" | "slug">): Promise<Destination | null> {
+    // destinations.id is a Postgres uuid column.
+    const id = newBlogId();
     const slug = d.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
     const entry: Destination = { ...d, id, slug, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
     state = { ...state, destinations: [entry, ...state.destinations] };
+    emit();
     logActivity("created", "Destination", id, entry.name);
-    notify({ type: "success", title: "Destination created", message: `${entry.name} added.` });
-    emit();
-    return entry;
+    try {
+      await destinationCloudSave(entry);
+      notify({ type: "success", title: "Destination created", message: `${entry.name} published to the website.` });
+      return entry;
+    } catch (error) {
+      state = { ...state, destinations: state.destinations.filter((x) => x.id !== id) };
+      emit();
+      notify({ type: "error", title: "Destination not created", message: error instanceof Error ? error.message : "The destination could not be saved.", duration: 9000 });
+      return null;
+    }
   },
-  updateDestination(id: string, patch: Partial<Destination>) {
+  async updateDestination(id: string, patch: Partial<Destination>): Promise<boolean> {
     const d = state.destinations.find((x) => x.id === id);
-    if (!d) return;
-    state = { ...state, destinations: state.destinations.map((x) => x.id === id ? { ...x, ...patch, updatedAt: new Date().toISOString() } : x) };
+    if (!d) return false;
+    const next = { ...d, ...patch, updatedAt: new Date().toISOString() };
+    state = { ...state, destinations: state.destinations.map((x) => x.id === id ? next : x) };
+    emit();
     logActivity("updated", "Destination", id, d.name);
-    notify({ type: "success", title: "Destination updated", message: `${d.name} saved.` });
-    emit();
+    try {
+      await destinationCloudSave(next);
+      notify({ type: "success", title: "Destination updated", message: `${d.name} published to the website.` });
+      return true;
+    } catch (error) {
+      state = { ...state, destinations: state.destinations.map((x) => x.id === id ? d : x) };
+      emit();
+      notify({ type: "error", title: "Destination not updated", message: error instanceof Error ? error.message : "The changes could not be saved.", duration: 9000 });
+      return false;
+    }
   },
-  deleteDestination(id: string) {
+  async deleteDestination(id: string): Promise<boolean> {
     const d = state.destinations.find((x) => x.id === id);
-    if (!d) return;
+    if (!d) return false;
     state = { ...state, destinations: state.destinations.filter((x) => x.id !== id) };
-    logActivity("deleted", "Destination", id, d.name);
-    notify({ type: "info", title: "Destination removed", message: `${d.name} removed.` });
     emit();
+    logActivity("deleted", "Destination", id, d.name);
+    try {
+      await destinationCloudDelete(id);
+      notify({ type: "info", title: "Destination removed", message: `${d.name} removed from the website.` });
+      return true;
+    } catch (error) {
+      state = { ...state, destinations: [d, ...state.destinations] };
+      emit();
+      notify({ type: "error", title: "Destination not removed", message: error instanceof Error ? error.message : "The destination could not be removed.", duration: 9000 });
+      return false;
+    }
   },
 
   // Media
-  createMedia(m: Omit<MediaAsset, "id" | "createdAt">) {
-    const id = uid();
+  async createMedia(m: Omit<MediaAsset, "id" | "createdAt">): Promise<MediaAsset | null> {
+    const id = newBlogId();
     const entry: MediaAsset = { ...m, id, createdAt: new Date().toISOString() };
     state = { ...state, media: [entry, ...state.media] };
+    emit();
     logActivity("created", "Media Asset", id, entry.name);
-    notify({ type: "success", title: "Media uploaded", message: `${entry.name} added to library.` });
-    emit();
-    return entry;
+    try {
+      await mediaCloudSave(entry);
+      notify({ type: "success", title: "Media uploaded", message: `${entry.name} added to library.` });
+      return entry;
+    } catch (error) {
+      state = { ...state, media: state.media.filter((x) => x.id !== id) };
+      emit();
+      notify({ type: "error", title: "Upload not saved", message: error instanceof Error ? error.message : "The asset could not be saved.", duration: 9000 });
+      return null;
+    }
   },
-  updateMedia(id: string, patch: Partial<MediaAsset>) {
-    state = { ...state, media: state.media.map((m) => m.id === id ? { ...m, ...patch } : m) };
-    emit();
-  },
-  deleteMedia(id: string) {
+  async updateMedia(id: string, patch: Partial<MediaAsset>): Promise<boolean> {
     const m = state.media.find((x) => x.id === id);
-    if (!m) return;
-    state = { ...state, media: state.media.map((x) => x.id === id ? { ...x, archived: true } : x) };
-    logActivity("archived", "Media Asset", id, m.name);
-    notify({ type: "info", title: "Asset archived", message: `${m.name} hidden from library.` });
+    if (!m) return false;
+    const next = { ...m, ...patch };
+    state = { ...state, media: state.media.map((x) => x.id === id ? next : x) };
     emit();
+    try {
+      await mediaCloudSave(next);
+      notify({ type: "success", title: "Asset saved", message: `${next.name} updated.` });
+      return true;
+    } catch (error) {
+      state = { ...state, media: state.media.map((x) => x.id === id ? m : x) };
+      emit();
+      notify({ type: "error", title: "Save failed", message: error instanceof Error ? error.message : "The asset could not be saved.", duration: 9000 });
+      return false;
+    }
+  },
+  async deleteMedia(id: string): Promise<boolean> {
+    const m = state.media.find((x) => x.id === id);
+    if (!m) return false;
+    const archived = { ...m, archived: true };
+    state = { ...state, media: state.media.map((x) => x.id === id ? archived : x) };
+    emit();
+    logActivity("archived", "Media Asset", id, m.name);
+    try {
+      await mediaCloudSave(archived);
+      notify({ type: "info", title: "Asset archived", message: `${m.name} hidden from library.` });
+      return true;
+    } catch (error) {
+      state = { ...state, media: state.media.map((x) => x.id === id ? m : x) };
+      emit();
+      notify({ type: "error", title: "Archive failed", message: error instanceof Error ? error.message : "The asset could not be archived.", duration: 9000 });
+      return false;
+    }
   },
 
   // Blog — write-through to Supabase so the public site stays synchronized.
@@ -2257,23 +3241,42 @@ const actions = {
   },
 
   // Guides
-  createGuide(g: Omit<Guide, "id" | "createdAt" | "slug">) {
-    const id = uid();
+  async createGuide(g: Omit<Guide, "id" | "createdAt" | "slug">): Promise<Guide | null> {
+    // guides.id is a Postgres uuid column.
+    const id = newBlogId();
     const slug = g.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
     const entry: Guide = { ...g, id, slug, createdAt: new Date().toISOString() };
     state = { ...state, guides: [entry, ...state.guides] };
+    emit();
     logActivity("created", "Guide", id, entry.name);
-    notify({ type: "success", title: "Guide added", message: `${entry.name} added to the roster.` });
-    emit();
-    return entry;
+    try {
+      await guideCloudSave(entry);
+      notify({ type: "success", title: "Guide added", message: `${entry.name} added to the roster.` });
+      return entry;
+    } catch (error) {
+      state = { ...state, guides: state.guides.filter((x) => x.id !== id) };
+      emit();
+      notify({ type: "error", title: "Guide not added", message: error instanceof Error ? error.message : "The guide could not be saved.", duration: 9000 });
+      return null;
+    }
   },
-  updateGuide(id: string, patch: Partial<Guide>) {
+  async updateGuide(id: string, patch: Partial<Guide>): Promise<boolean> {
     const g = state.guides.find((x) => x.id === id);
-    if (!g) return;
-    state = { ...state, guides: state.guides.map((x) => x.id === id ? { ...x, ...patch } : x) };
-    logActivity("updated", "Guide", id, g.name);
-    notify({ type: "success", title: "Guide updated", message: `${g.name} saved.` });
+    if (!g) return false;
+    const next = { ...g, ...patch };
+    state = { ...state, guides: state.guides.map((x) => x.id === id ? next : x) };
     emit();
+    logActivity("updated", "Guide", id, g.name);
+    try {
+      await guideCloudSave(next);
+      notify({ type: "success", title: "Guide updated", message: `${g.name} saved.` });
+      return true;
+    } catch (error) {
+      state = { ...state, guides: state.guides.map((x) => x.id === id ? g : x) };
+      emit();
+      notify({ type: "error", title: "Guide not updated", message: error instanceof Error ? error.message : "The changes could not be saved.", duration: 9000 });
+      return false;
+    }
   },
 
   /**
@@ -2317,22 +3320,40 @@ const actions = {
   },
 
   // Vehicles
-  createVehicle(v: Omit<Vehicle, "id" | "createdAt">) {
-    const id = uid();
+  async createVehicle(v: Omit<Vehicle, "id" | "createdAt">): Promise<Vehicle | null> {
+    const id = newBlogId();
     const entry: Vehicle = { ...v, id, createdAt: new Date().toISOString() };
     state = { ...state, vehicles: [entry, ...state.vehicles] };
+    emit();
     logActivity("created", "Vehicle", id, entry.fleetCode);
-    notify({ type: "success", title: "Vehicle added", message: `${entry.fleetCode} added to the fleet.` });
-    emit();
-    return entry;
+    try {
+      await vehicleCloudSave(entry);
+      notify({ type: "success", title: "Vehicle added", message: `${entry.fleetCode} added to the fleet.` });
+      return entry;
+    } catch (error) {
+      state = { ...state, vehicles: state.vehicles.filter((x) => x.id !== id) };
+      emit();
+      notify({ type: "error", title: "Vehicle not added", message: error instanceof Error ? error.message : "The vehicle could not be saved.", duration: 9000 });
+      return null;
+    }
   },
-  updateVehicle(id: string, patch: Partial<Vehicle>) {
+  async updateVehicle(id: string, patch: Partial<Vehicle>): Promise<boolean> {
     const v = state.vehicles.find((x) => x.id === id);
-    if (!v) return;
-    state = { ...state, vehicles: state.vehicles.map((x) => x.id === id ? { ...x, ...patch } : x) };
-    logActivity("updated", "Vehicle", id, v.fleetCode);
-    notify({ type: "success", title: "Vehicle updated", message: `${v.fleetCode} saved.` });
+    if (!v) return false;
+    const next = { ...v, ...patch };
+    state = { ...state, vehicles: state.vehicles.map((x) => x.id === id ? next : x) };
     emit();
+    logActivity("updated", "Vehicle", id, v.fleetCode);
+    try {
+      await vehicleCloudSave(next);
+      notify({ type: "success", title: "Vehicle updated", message: `${v.fleetCode} saved.` });
+      return true;
+    } catch (error) {
+      state = { ...state, vehicles: state.vehicles.map((x) => x.id === id ? v : x) };
+      emit();
+      notify({ type: "error", title: "Vehicle not updated", message: error instanceof Error ? error.message : "The changes could not be saved.", duration: 9000 });
+      return false;
+    }
   },
 
   /**
@@ -2416,13 +3437,23 @@ const actions = {
   },
 
   // Customers
-  updateCustomer(id: string, patch: Partial<Customer>) {
+  async updateCustomer(id: string, patch: Partial<Customer>): Promise<boolean> {
     const c = state.customers.find((x) => x.id === id);
-    if (!c) return;
-    state = { ...state, customers: state.customers.map((x) => x.id === id ? { ...x, ...patch } : x) };
-    logActivity("updated", "Customer", id, c.name);
-    notify({ type: "success", title: "Customer updated", message: `${c.name} saved.` });
+    if (!c) return false;
+    const next = { ...c, ...patch };
+    state = { ...state, customers: state.customers.map((x) => x.id === id ? next : x) };
     emit();
+    logActivity("updated", "Customer", id, c.name);
+    try {
+      await customerCloudSave(next);
+      notify({ type: "success", title: "Customer updated", message: `${c.name} saved.` });
+      return true;
+    } catch (error) {
+      state = { ...state, customers: state.customers.map((x) => x.id === id ? c : x) };
+      emit();
+      notify({ type: "error", title: "Customer not updated", message: error instanceof Error ? error.message : "The changes could not be saved.", duration: 9000 });
+      return false;
+    }
   },
 
   // Users
@@ -2542,24 +3573,7 @@ const actions = {
 
   resetDemoData() {
     state = {
-      ...loadState(),
-      users: seedUsers,
-      bookings: seedBookings,
-      packages: seedPackages,
-      publicPackages: seedPackages,
-      destinations: seedDestinations,
-      media: seedMedia,
-      blogPosts: seedBlogPosts,
-      publicBlogPosts: seedBlogPosts,
-      guides: seedGuides,
-      vehicles: seedVehicles,
-      customers: seedCustomers,
-      pages: seedPages,
-      publicPages: seedPages,
-      siteSettings: seedSiteSettings,
-      publicSiteSettings: seedSiteSettings,
-      publicTestimonials: [],
-      activity: seedActivity,
+      ...seedState(),
       theme: state.theme,
       currentUserId: state.currentUserId,
       notifications: [],

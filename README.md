@@ -21,18 +21,24 @@ A cinematic six-page luxury safari experience for Olkinyei Expeditions. The appl
 3. Add your Supabase project URL and publishable key.
 4. Start the Vite development server with `npm run dev`.
 
-Without Supabase credentials, the site enters a clearly labelled demonstration mode. Bookings, content edits, prices, and media changes persist in local storage. The demo admin code is `OLK2026`. This fallback is intended for design review only, not production.
+Without Supabase credentials, the site enters a clearly labelled demonstration mode. Bookings, content edits, prices, and media changes persist in local storage. This fallback is intended for design review only, not production. With Supabase connected, the shared database is the single source of truth for every CMS-managed collection (site settings, pages, packages, blog, testimonials, destinations, guides, vehicles, customers, and media), so edits reach every browser and device.
 
 ## Supabase Setup
 
 1. Create a Supabase project.
 2. Run `supabase/schema.sql` in the SQL editor.
-3. Create the first staff user in Authentication.
-4. Add a matching row to `public.profiles` with the user's auth UUID and role `admin`.
-5. Enable Realtime for `public.bookings` if the final statement in the schema is skipped by an existing publication.
-6. Deploy `supabase/functions/send-booking-confirmation`.
-7. Configure `RESEND_API_KEY`, `BOOKING_TEAM_EMAIL`, and `BOOKING_FROM_EMAIL` as Edge Function secrets.
-8. Add the Vite public credentials from `.env.example` to the Vercel project.
+3. Run the incremental migrations in order:
+   `auth_schema_sync.sql`, `role_canonicalization.sql`, `blog_posts_sync.sql`,
+   `bookings_hardening.sql`, `cms_content.sql`, `packages_sync.sql`,
+   `testimonials_moderation.sql`, `testimonials_sources.sql`, and
+   `cms_global_sync.sql` (adds destinations/guides/vehicles/customers/media
+   columns, the `media_assets` table, RLS, Realtime, and seed data).
+4. Create the first staff user in Authentication.
+5. Add a matching row to `public.profiles` with the user's auth UUID and role `admin`.
+6. Enable Realtime for `public.bookings` if the final statement in the schema is skipped by an existing publication.
+7. Deploy `supabase/functions/send-booking-confirmation`.
+8. Configure `RESEND_API_KEY`, `BOOKING_TEAM_EMAIL`, and `BOOKING_FROM_EMAIL` as Edge Function secrets.
+9. Add the Vite public credentials from `.env.example` to the Vercel project.
 
 The browser receives only Supabase's publishable key. Row-level security limits sensitive reads and updates to authenticated staff. Email provider credentials remain inside the Edge Function.
 

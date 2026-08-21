@@ -12,17 +12,21 @@ function GuideEditor({ guide, onClose }: { guide: Guide | null; onClose: () => v
     email: "", phone: "",
   });
   const update = <K extends keyof Guide>(key: K, value: Guide[K]) => setForm((current) => ({ ...current, [key]: value }));
-  const save = () => {
+  const [busy, setBusy] = useState(false);
+  const save = async () => {
     if (!form.name) { store.notify({ type: "error", title: "Name required" }); return; }
-    if (guide) store.actions.updateGuide(guide.id, form);
-    else store.actions.createGuide(form as Omit<Guide, "id" | "createdAt" | "slug">);
-    onClose();
+    setBusy(true);
+    let ok = false;
+    if (guide) ok = await store.actions.updateGuide(guide.id, form);
+    else ok = (await store.actions.createGuide(form as Omit<Guide, "id" | "createdAt" | "slug">)) !== null;
+    setBusy(false);
+    if (ok) onClose();
   };
 
   return (
     <Modal open onClose={onClose} size="lg" title={guide ? `Edit ${guide.name}` : "New Guide"} footer={<>
       <Button variant="ghost" onClick={onClose}>Cancel</Button>
-      <Button onClick={save}>{guide ? "Save changes" : "Add guide"}</Button>
+      <Button loading={busy} onClick={() => void save()}>{guide ? "Save changes" : "Add guide"}</Button>
     </>}>
       <div className="space-y-5">
         <div className="grid gap-4 md:grid-cols-2">

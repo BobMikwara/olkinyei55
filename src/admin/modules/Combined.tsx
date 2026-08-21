@@ -11,11 +11,17 @@ import type { Customer, Destination, AdminUser, Role } from "../types";
 
 function CustomerEditor({ customer, onClose }: { customer: Customer; onClose: () => void }) {
   const [form, setForm] = useState<Customer>(customer);
-  const save = () => { store.actions.updateCustomer(customer.id, form); onClose(); };
+  const [busy, setBusy] = useState(false);
+  const save = async () => {
+    setBusy(true);
+    const ok = await store.actions.updateCustomer(customer.id, form);
+    setBusy(false);
+    if (ok) onClose();
+  };
   return (
     <Modal open onClose={onClose} size="lg" title={customer.name} footer={<>
       <Button variant="ghost" onClick={onClose}>Cancel</Button>
-      <Button onClick={save}>Save changes</Button>
+      <Button loading={busy} onClick={() => void save()}>Save changes</Button>
     </>}>
       <div className="space-y-5">
         <div className="grid gap-4 md:grid-cols-2">
@@ -109,17 +115,21 @@ function DestinationEditor({ destination, onClose }: { destination: Destination 
     seo: { title: "", description: "" },
   });
   const update = <K extends keyof Destination>(key: K, value: Destination[K]) => setForm((current) => ({ ...current, [key]: value }));
-  const save = () => {
+  const [busy, setBusy] = useState(false);
+  const save = async () => {
     if (!form.name) { store.notify({ type: "error", title: "Name required" }); return; }
-    if (destination) store.actions.updateDestination(destination.id, form);
-    else store.actions.createDestination(form as Omit<Destination, "id" | "createdAt" | "updatedAt" | "slug">);
-    onClose();
+    setBusy(true);
+    let ok = false;
+    if (destination) ok = await store.actions.updateDestination(destination.id, form);
+    else ok = (await store.actions.createDestination(form as Omit<Destination, "id" | "createdAt" | "updatedAt" | "slug">)) !== null;
+    setBusy(false);
+    if (ok) onClose();
   };
 
   return (
     <Modal open onClose={onClose} size="lg" title={destination ? `Edit ${destination.name}` : "New Destination"} footer={<>
       <Button variant="ghost" onClick={onClose}>Cancel</Button>
-      <Button onClick={save}>{destination ? "Save" : "Create"}</Button>
+      <Button loading={busy} onClick={() => void save()}>{destination ? "Save" : "Create"}</Button>
     </>}>
       <div className="space-y-5">
         <div className="grid gap-4 md:grid-cols-2">
