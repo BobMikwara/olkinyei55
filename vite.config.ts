@@ -16,4 +16,10 @@ export default defineConfig({
       "@": path.resolve(__dirname, "src"),
     },
   },
+  // Dev-server only: accept the ephemeral preview hostname Arena uses to proxy
+  // the running app. Production builds (vite build) ignore this block.
+  server: {
+    host: true,
+    allowedHosts: true,
+  },
 });

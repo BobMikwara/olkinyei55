@@ -195,11 +195,22 @@ const STORAGE_KEY = "olkinyei-admin-v2";
 // to Supabase when configured (cross-device bridge).
 const PUBLIC_BOOKINGS_KEY = "olkinyei-bookings";
 
+/**
+ * The exact set of packages the public website must show: published and not
+ * archived. Used to keep `publicPackages` in sync with the CMS library when
+ * there is no cloud backend to reload from (demo/local-storage mode), so a
+ * CMS price / Included / Not Included edit is never lost on the public site.
+ */
+function publicPackagesFromStaff(staff: SafariPackage[]): SafariPackage[] {
+  return staff.filter((p) => p.published && !p.archived);
+}
+
 function loadState(): StoreState {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
       const saved = JSON.parse(raw) as Partial<StoreState>;
+      const staffPackages = saved.packages ?? seedPackages;
       return {
         theme: saved.theme ?? "dark",
         currentUserId: saved.currentUserId ?? null,
@@ -207,8 +218,8 @@ function loadState(): StoreState {
         users: saved.users ?? seedUsers,
         bookings: saved.bookings ?? seedBookings,
         newBookingsCount: saved.newBookingsCount ?? 0,
-        packages: saved.packages ?? seedPackages,
-        publicPackages: seedPackages,
+        packages: staffPackages,
+        publicPackages: publicPackagesFromStaff(staffPackages),
         destinations: saved.destinations ?? seedDestinations,
         media: saved.media ?? seedMedia,
         blogPosts: saved.blogPosts ?? seedBlogPosts,
@@ -236,7 +247,7 @@ function loadState(): StoreState {
     bookings: seedBookings,
     newBookingsCount: 0,
     packages: seedPackages,
-    publicPackages: seedPackages,
+    publicPackages: publicPackagesFromStaff(seedPackages),
     destinations: seedDestinations,
     media: seedMedia,
     blogPosts: seedBlogPosts,
@@ -399,7 +410,9 @@ window.addEventListener("storage", (event) => {
       state = {
         ...loadState(),
         ...saved,
-        publicPackages: state.publicPackages,
+        // Without a cloud backend the CMS library is the source of truth, so
+        // re-derive the public set from the packages edited in another tab.
+        publicPackages: hasCloudBackend ? state.publicPackages : publicPackagesFromStaff(saved.packages ?? state.packages),
         publicBlogPosts: state.publicBlogPosts,
         publicTestimonials: state.publicTestimonials,
         publicPages: state.publicPages,
@@ -1082,39 +1095,59 @@ async function upsertPackageRow(pkg: SafariPackage): Promise<string> {
   }
 }
 
-/** Persists a package to the database. Errors surface, never swallowed. */
-function packageCloudSave(pkg: SafariPackage | null, deletedId?: string): void {
+/**
+ * Persists a package to the database (or to the local content layer when there
+ * is no cloud backend). Resolves on success, rejects with a descriptive message
+ * on failure so the caller can surface a truthful save state.
+ */
+async function packageCloudSave(pkg: SafariPackage | null, deletedId?: string): Promise<void> {
   const client = supabase;
-  if (!client) return;
-  void (async () => {
-    try {
-      if (deletedId) {
-        if (!UUID_PATTERN.test(deletedId)) return;
-        const { error } = await client.from("packages").delete().eq("id", deletedId);
-        if (error) throw error;
-        publicPackagesBootstrapped = false;
-        await loadPublicPackages({ force: true, requireSuccess: true });
-        return;
-      }
-      if (!pkg) return;
-      const cloudId = await upsertPackageRow(pkg);
-      if (cloudId !== pkg.id) {
-        state = { ...state, packages: state.packages.map((p) => (p.id === pkg.id ? { ...p, id: cloudId } : p)) };
-        emit();
-      }
-      publicPackagesBootstrapped = false;
-      await loadPublicPackages({ force: true, requireSuccess: true });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      if (import.meta.env.DEV) console.error("[Olkinyei] package cloud write failed:", message);
-      notify({
-        type: "error",
-        title: "Not published to the website",
-        message: `Supabase rejected the change: ${message.slice(0, 140)}`,
-        duration: 9000,
-      });
+  // No cloud backend (demo / local-storage mode): the CMS library is the single
+  // source of truth, so publish to the public website directly from it. Without
+  // this the public site would keep showing the stale bundled seed forever.
+  if (!client) {
+    state = { ...state, publicPackages: publicPackagesFromStaff(state.packages) };
+    emit();
+    return;
+  }
+  try {
+    if (deletedId) {
+      if (!UUID_PATTERN.test(deletedId)) return;
+      const { error } = await client.from("packages").delete().eq("id", deletedId);
+      if (error) throw new Error(error.message);
+      await refreshPublicPackagesAfterWrite();
+      return;
     }
-  })();
+    if (!pkg) return;
+    const cloudId = await upsertPackageRow(pkg);
+    if (cloudId !== pkg.id) {
+      state = { ...state, packages: state.packages.map((p) => (p.id === pkg.id ? { ...p, id: cloudId } : p)) };
+      emit();
+    }
+    await refreshPublicPackagesAfterWrite();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (import.meta.env.DEV) console.error("[Olkinyei] package cloud write failed:", message);
+    throw new Error(`The database rejected the change: ${message.slice(0, 160)}`);
+  }
+}
+
+/**
+ * Re-read the published package set from the database after a write.
+ * A reload failure is logged, not fatal: the Realtime channel and the next
+ * page load still converge on the freshly written row, and the write itself
+ * already succeeded (that is what determines the save result).
+ */
+async function refreshPublicPackagesAfterWrite(): Promise<void> {
+  publicPackagesBootstrapped = false;
+  try {
+    await loadPublicPackages({ force: true, requireSuccess: true });
+  } catch (error) {
+    if (import.meta.env.DEV) console.warn(
+      "[Olkinyei] Package saved but public list refresh failed:",
+      error instanceof Error ? error.message : error,
+    );
+  }
 }
 
 // ============ Testimonials (public.testimonials) ============
@@ -1864,44 +1897,71 @@ const actions = {
   },
 
   // Packages
-  createPackage(pkg: Omit<SafariPackage, "id" | "createdAt" | "updatedAt" | "slug">) {
+  async createPackage(pkg: Omit<SafariPackage, "id" | "createdAt" | "updatedAt" | "slug">): Promise<SafariPackage | null> {
     // packages.id is a Postgres uuid column.
     const id = newBlogId();
     const slug = pkg.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
     const entry: SafariPackage = { ...pkg, id, slug, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
     state = { ...state, packages: [entry, ...state.packages] };
+    emit();
     logActivity("created", "Package", id, entry.title);
-    notify({ type: "success", title: "Package created", message: `${entry.title} is now in your library.` });
-    emit();
-    packageCloudSave(entry);
-    return entry;
+    try {
+      await packageCloudSave(entry);
+      notify({ type: "success", title: "Package created", message: `${entry.title} published to the website.` });
+      return entry;
+    } catch (error) {
+      // Roll the draft back so the library never keeps a package that failed to save.
+      state = { ...state, packages: state.packages.filter((p) => p.id !== id) };
+      emit();
+      notify({ type: "error", title: "Package not created", message: error instanceof Error ? error.message : "The package could not be saved.", duration: 9000 });
+      return null;
+    }
   },
-  updatePackage(id: string, patch: Partial<SafariPackage>) {
+  async updatePackage(id: string, patch: Partial<SafariPackage>): Promise<boolean> {
     const pkg = state.packages.find((p) => p.id === id);
-    if (!pkg) return;
+    if (!pkg) return false;
     const next = { ...pkg, ...patch, updatedAt: new Date().toISOString() };
+    // Optimistic update for a responsive UI; reverted if the write fails so the
+    // library never keeps values the database did not accept.
     state = { ...state, packages: state.packages.map((p) => (p.id === id ? next : p)) };
-    logActivity("updated", "Package", id, pkg.title);
-    notify({ type: "success", title: "Package updated", message: `${pkg.title} saved.` });
     emit();
-    packageCloudSave(next);
+    logActivity("updated", "Package", id, pkg.title);
+    try {
+      await packageCloudSave(next);
+      notify({ type: "success", title: "Package updated", message: `${pkg.title} published to the website.` });
+      return true;
+    } catch (error) {
+      // Restore the previous values — never leave empty/stale data behind.
+      state = { ...state, packages: state.packages.map((p) => (p.id === id ? pkg : p)) };
+      emit();
+      notify({ type: "error", title: "Package not updated", message: error instanceof Error ? error.message : "The changes could not be saved.", duration: 9000 });
+      return false;
+    }
   },
-  deletePackage(id: string) {
+  async deletePackage(id: string): Promise<boolean> {
     const pkg = state.packages.find((p) => p.id === id);
-    if (!pkg) return;
+    if (!pkg) return false;
     // Archive rather than delete: bookings reference packages by title.
     const next = { ...pkg, archived: true, published: false };
     state = { ...state, packages: state.packages.map((p) => (p.id === id ? next : p)) };
-    logActivity("archived", "Package", id, pkg.title);
-    notify({ type: "info", title: "Package archived", message: `${pkg.title} is hidden from the public site.` });
     emit();
-    packageCloudSave(next);
+    logActivity("archived", "Package", id, pkg.title);
+    try {
+      await packageCloudSave(next);
+      notify({ type: "info", title: "Package archived", message: `${pkg.title} is hidden from the public site.` });
+      return true;
+    } catch (error) {
+      state = { ...state, packages: state.packages.map((p) => (p.id === id ? pkg : p)) };
+      emit();
+      notify({ type: "error", title: "Package not archived", message: error instanceof Error ? error.message : "The package could not be archived.", duration: 9000 });
+      return false;
+    }
   },
-  duplicatePackage(id: string) {
+  async duplicatePackage(id: string) {
     const pkg = state.packages.find((p) => p.id === id);
     if (!pkg) return;
     const { slug: _slug, id: _id, createdAt: _c, updatedAt: _u, ...rest } = pkg;
-    actions.createPackage({ ...rest, title: `${pkg.title} (copy)`, published: false, featured: false });
+    await actions.createPackage({ ...rest, title: `${pkg.title} (copy)`, published: false, featured: false });
   },
 
   // Destinations
