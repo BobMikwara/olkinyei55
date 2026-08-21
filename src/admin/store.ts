@@ -585,6 +585,23 @@ let publicCmsContentBootstrapped = false;
 
 type CmsContentRow = { id: string; content: unknown };
 
+function shouldLogPublicDiagnostics() {
+  if (typeof window === "undefined") return import.meta.env.DEV;
+  const host = window.location.hostname.toLowerCase();
+  return import.meta.env.DEV || host === "localhost" || host === "127.0.0.1" || host.endsWith(".vercel.app");
+}
+
+function logPublicReadDiagnostics(label: string, details: Record<string, unknown>) {
+  if (!shouldLogPublicDiagnostics()) return;
+  console.log(`[PUBLIC ${label}]`, details);
+}
+
+function logPublicReadError(label: string, error: unknown, details: Record<string, unknown> = {}) {
+  if (!shouldLogPublicDiagnostics()) return;
+  const message = error instanceof Error ? error.message : String(error);
+  console.error(`[PUBLIC ${label}] Query failed: ${message}`, details);
+}
+
 function applyCloudSiteSettings(content: unknown) {
   if (!content || typeof content !== "object" || Array.isArray(content)) return;
   const incoming = content as Partial<SiteSettings>;
@@ -1224,19 +1241,26 @@ async function loadPublicPackages(options: { force?: boolean; requireSuccess?: b
   if (!client || (publicPackagesBootstrapped && !options.force)) return;
   publicPackagesBootstrapped = true;
   try {
-    let { data, error } = await client.from("packages").select("*").order("created_at", { ascending: false });
+    let orderColumn = "created_at";
+    let { data, error } = await client.from("packages").select("*").order(orderColumn, { ascending: false });
     if (error && isMissingColumnError(error.message)) {
-      ({ data, error } = await client.from("packages").select("*").order("updated_at", { ascending: false }));
+      orderColumn = "updated_at";
+      ({ data, error } = await client.from("packages").select("*").order(orderColumn, { ascending: false }));
     }
     if (error) throw new Error(error.message);
-    // Never fall back to the bundled seed here: that seed is what made CMS
-    // price/title edits look like they never reached the public website.
-    state = { ...state, publicPackages: (data as DbPackageRow[] | null)?.map(packageFromRow) ?? [] };
+    const rows = (data as DbPackageRow[] | null) ?? [];
+    state = { ...state, publicPackages: rows.map(packageFromRow) };
     emit();
+    logPublicReadDiagnostics("SAFARIS", {
+      table: "packages",
+      query: `select * order by ${orderColumn} desc`,
+      recordCount: rows.length,
+      sample: rows.slice(0, 3).map((row) => ({ id: row.id, slug: row.slug, title: row.title, published: row.published, archived: row.archived })),
+    });
   } catch (error) {
     publicPackagesBootstrapped = false;
+    logPublicReadError("SAFARIS", error, { table: "packages", filter: "anon published content via RLS" });
     if (options.requireSuccess) throw error;
-    if (import.meta.env.DEV) console.warn("[Olkinyei] Could not load public safari packages:", error instanceof Error ? error.message : error);
   }
 }
 
