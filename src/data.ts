@@ -1,5 +1,6 @@
 export type Safari = {
   id: string;
+  slug?: string;
   title: string;
   region: string;
   duration: string;
@@ -8,21 +9,36 @@ export type Safari = {
   image: string;
   gallery: string[];
   summary: string;
+  description?: string;
   signature: string;
+  highlights?: string[];
   included: string[];
   excluded: string[];
   availability: string[];
   coordinates: [number, number];
+  country?: ("Kenya" | "Tanzania")[];
+  parks?: string[];
+  wildlife?: string[];
+  tags?: string[];
+  featured?: boolean;
+  seo?: { title: string; description: string };
 };
 
 export type Destination = {
+  slug?: string;
   name: string;
   country: "Kenya" | "Tanzania";
   coordinates: [number, number];
   best: string;
   animal: string;
   image: string;
+  gallery?: string[];
   description: string;
+  longDescription?: string;
+  activities?: string[];
+  featured?: boolean;
+  published?: boolean;
+  seo?: { title: string; description: string };
 };
 
 export type Booking = {
