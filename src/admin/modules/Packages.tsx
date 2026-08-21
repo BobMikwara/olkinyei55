@@ -121,9 +121,16 @@ function PackageEditor({ pkg, onClose }: { pkg: SafariPackage | null; onClose: (
 
   const update = <K extends keyof SafariPackage>(key: K, value: SafariPackage[K]) => setForm((current) => ({ ...current, [key]: value }));
 
-  const save = () => {
+  const save = async () => {
     if (!form.title || !form.region) {
       store.notify({ type: "error", title: "Missing required fields", message: "Title and region are required." });
+      return;
+    }
+    // The database stores price in a `price_usd integer check (price_usd > 0)`
+    // column, so reject zero/negative here with a clear message instead of
+    // letting the upsert fail with an obscure constraint error.
+    if (!form.price || Number.isNaN(Number(form.price)) || Number(form.price) <= 0) {
+      store.notify({ type: "error", title: "Invalid price", message: "Price must be a positive number (USD)." });
       return;
     }
     const includedRaw = (form.included ?? []).map((i) => String(i));
@@ -142,12 +149,16 @@ function PackageEditor({ pkg, onClose }: { pkg: SafariPackage | null; onClose: (
     }
     const includedItems = includedRaw.map((i) => i.trim()).filter(Boolean);
     const excludedItems = excludedRaw.map((i) => i.trim()).filter(Boolean);
+    // Only close when the change actually persisted. The store surfaces its own
+    // error toast and reverts any optimistic update on failure, so we keep the
+    // editor open (with the entered values intact) for the admin to retry.
+    let ok = false;
     if (pkg) {
-      store.actions.updatePackage(pkg.id, { ...form, included: includedItems, excluded: excludedItems });
+      ok = await store.actions.updatePackage(pkg.id, { ...form, included: includedItems, excluded: excludedItems });
     } else {
-      store.actions.createPackage({ ...form, included: includedItems, excluded: excludedItems } as Omit<SafariPackage, "id" | "createdAt" | "updatedAt" | "slug">);
+      ok = (await store.actions.createPackage({ ...form, included: includedItems, excluded: excludedItems } as Omit<SafariPackage, "id" | "createdAt" | "updatedAt" | "slug">)) !== null;
     }
-    onClose();
+    if (ok) onClose();
   };
 
   return (
