@@ -15,17 +15,21 @@ function VehicleEditor({ vehicle, onClose }: { vehicle: Vehicle | null; onClose:
     lastService: "", nextService: "", insurance: "", mileage: 0, notes: "",
   });
   const update = <K extends keyof Vehicle>(key: K, value: Vehicle[K]) => setForm((current) => ({ ...current, [key]: value }));
-  const save = () => {
+  const [busy, setBusy] = useState(false);
+  const save = async () => {
     if (!form.fleetCode) { store.notify({ type: "error", title: "Fleet code required" }); return; }
-    if (vehicle) store.actions.updateVehicle(vehicle.id, form);
-    else store.actions.createVehicle(form as Omit<Vehicle, "id" | "createdAt">);
-    onClose();
+    setBusy(true);
+    let ok = false;
+    if (vehicle) ok = await store.actions.updateVehicle(vehicle.id, form);
+    else ok = (await store.actions.createVehicle(form as Omit<Vehicle, "id" | "createdAt">)) !== null;
+    setBusy(false);
+    if (ok) onClose();
   };
 
   return (
     <Modal open onClose={onClose} size="lg" title={vehicle ? `Edit ${vehicle.fleetCode}` : "New Vehicle"} footer={<>
       <Button variant="ghost" onClick={onClose}>Cancel</Button>
-      <Button onClick={save}>{vehicle ? "Save" : "Add"}</Button>
+      <Button loading={busy} onClick={() => void save()}>{vehicle ? "Save" : "Add"}</Button>
     </>}>
       <div className="space-y-5">
         <div className="grid gap-4 md:grid-cols-3">

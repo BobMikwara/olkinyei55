@@ -138,6 +138,10 @@ row model. No code references a non-existent column.
 4. supabase/blog_posts_sync.sql
 5. supabase/bookings_hardening.sql
 6. supabase/cms_content.sql
+7. supabase/packages_sync.sql
+8. supabase/testimonials_moderation.sql
+9. supabase/testimonials_sources.sql
+10. supabase/cms_global_sync.sql        ← new, required (destinations/guides/vehicles/customers/media)
 ```
 
 Verification query — must return zero rows:
