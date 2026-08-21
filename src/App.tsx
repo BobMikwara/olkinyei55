@@ -361,7 +361,9 @@ function HomePage({ navigate, content, openSafari, onOpenPost }: { navigate: (pa
   const site = useCmsStore((state) => state.publicSiteSettings);
   const liveSafaris = usePublishedSafaris();
   // Live blog posts from the CMS (Supabase blog_posts). Published only;
-  // featured first, then newest. Static seed is just the offline fallback.
+  // featured first, then newest. Static seed is ONLY the demo-mode fallback
+  // when no cloud backend is configured; in cloud mode an empty DB renders
+  // the empty state instead of silently masking it with demo content.
   const cmsPosts = useCmsStore((state) => state.publicBlogPosts);
   const publishedPosts = useMemo(() => {
     const live = cmsPosts
@@ -371,6 +373,7 @@ function HomePage({ navigate, content, openSafari, onOpenPost }: { navigate: (pa
         return new Date(b.publishedAt ?? 0).getTime() - new Date(a.publishedAt ?? 0).getTime();
       });
     if (live.length > 0) return live.slice(0, 3);
+    if (hasCloudBackend) return [];
     return blogPosts.slice(0, 3).map((post, index) => ({
       id: `static-${index}`, slug: post.title.toLowerCase().replace(/[^a-z0-9]+/g, "-"),
       title: post.title, excerpt: "", body: "", category: post.category as "Wildlife", tags: [],
@@ -401,7 +404,7 @@ function HomePage({ navigate, content, openSafari, onOpenPost }: { navigate: (pa
       <section className="manifesto section-pad"><p className="vertical-label">THE OLKINYEI WAY</p><div className="manifesto-copy"><p className="eyebrow" data-reveal>Not a tour. A rare point of view.</p><h2 className="split-reveal">{content.homeStatement}</h2><button className="text-link" onClick={() => navigate("about")}>Discover our philosophy <ArrowRight size={16} /></button></div></section>
       <section className="migration-story">
         <div className="migration-image"><img src={imagery.migration} alt="A vast wildebeest herd crossing the Serengeti" loading="lazy" data-parallax /></div><div className="migration-overlay" />
-        <div className="migration-copy"><p className="eyebrow">01 / THE GREAT MOVEMENT</p><h2 className="split-reveal">Two million lives.<br />One ancient instinct.</h2><p>We follow the rains north, positioning private camps near the migration without crowding its path.</p><button className="text-link text-link--light" onClick={() => openSafari(liveSafaris[0])}>Follow the migration <ArrowRight size={16} /></button></div>
+        <div className="migration-copy"><p className="eyebrow">01 / THE GREAT MOVEMENT</p><h2 className="split-reveal">Two million lives.<br />One ancient instinct.</h2><p>We follow the rains north, positioning private camps near the migration without crowding its path.</p><button className="text-link text-link--light" onClick={() => liveSafaris[0] && openSafari(liveSafaris[0])}>Follow the migration <ArrowRight size={16} /></button></div>
         <div className="migration-track" aria-hidden="true"><span /><span /><span /><span /><span /><span /><span /></div>
       </section>
       <section className="journeys section-pad">
@@ -459,17 +462,26 @@ function HomeTestimonialPreview({ navigate }: { navigate: (page: Page) => void }
 }
 
 function AboutPage({ navigate }: { navigate: (page: Page) => void }) {
-  // Guides are CMS-managed (Supabase public.guides); the static copy below is
-  // only a graceful fallback for a database that has not been seeded.
+  // Guides are CMS-managed (Supabase public.guides); Supabase is the single
+  // source of truth. In cloud mode an empty roster renders an empty state,
+  // never a hardcoded demo guide, so a missing query is never masked.
   const guides = usePublicGuides();
-  const guide = guides[0];
+  const guide = guides[0] ?? null;
   return (
     <>
       <PageHero eyebrow="OUR STORY" title="Born here. Still led by wonder." text="An independent East African company creating private journeys with deep local knowledge and a light footprint." image={imagery.portrait} />
       <section className="about-intro section-pad"><p className="vertical-label">WHY WE EXIST</p><div><p className="eyebrow" data-reveal>A different measure of luxury</p><h2 className="split-reveal">Not more things. More time, more space, more meaning.</h2><div className="two-column-copy" data-reveal><p>Olkinyei was founded by naturalists who saw that the finest safari was not the fastest route between sightings. It was the one that left room for silence, surprise and genuine connection.</p><p>Today our journeys are still designed in Nairobi and Arusha by people who know these landscapes first-hand. We stay small by choice, pairing each guest with one journey designer and one exceptional guide.</p></div></div></section>
       <section className="story-split"><ImageReveal src={imagery.lion} alt="A lion resting quietly beneath a tree" /><div className="story-split-copy"><p className="eyebrow">OUR PHILOSOPHY</p><h2 className="split-reveal">Wait longer.<br />Go deeper.</h2><p>We avoid sighting-chasing and crowded routes. Longer stays in fewer places reveal the relationships that make an ecosystem whole: a storm gathering, a lioness listening, a guide reading a faint mark in the dust.</p><div className="principles"><div><span>01</span><h3>Private by design</h3><p>Your vehicle, guide and pace are entirely your own.</p></div><div><span>02</span><h3>Local by nature</h3><p>East African ownership keeps knowledge and value close to home.</p></div><div><span>03</span><h3>Light on the land</h3><p>Smaller camps and measured operations protect what draws us here.</p></div></div></div></section>
       <section className="timeline section-pad"><SectionHeading number="02" eyebrow="OUR JOURNEY" title="A small company with a long view." /><div className="timeline-list">{timeline.map((item) => <div key={item.year} data-reveal><strong>{item.year}</strong><span /><p>{item.text}</p></div>)}</div></section>
-      <section className="guides section-pad dark-section"><SectionHeading number="03" eyebrow="YOUR GUIDES" title="The people who make the landscape legible." text="Career naturalists, gifted hosts and patient interpreters of the wild." dark /><div className="guide-feature"><div className="guide-portrait"><img src={guide?.portrait || imagery.portrait} alt={`${guide?.title ?? "Senior safari guide"} ${guide?.name ?? "Daniel Ole Nkoitoi"}`} loading="lazy" /></div><div className="guide-quote"><blockquote>"The sighting is only the beginning. My work is to help you understand what led to it."</blockquote><p>{guide?.name ?? "Daniel Ole Nkoitoi"} / {guide?.title ?? "Senior guide, Maasai Mara"}</p><dl><div><dt>In the field</dt><dd>{guide?.yearsInField ?? 19} years</dd></div><div><dt>Speciality</dt><dd>{guide?.speciality ?? "Predator behaviour"}</dd></div><div><dt>Languages</dt><dd>{guide?.languages?.length ? guide.languages.join(", ") : "Maa, Swahili, English"}</dd></div></dl></div></div></section>
+      <section className="guides section-pad dark-section"><SectionHeading number="03" eyebrow="YOUR GUIDES" title="The people who make the landscape legible." text="Career naturalists, gifted hosts and patient interpreters of the wild." dark />
+        {guide ? (
+          <div className="guide-feature"><div className="guide-portrait"><img src={guide.portrait || imagery.portrait} alt={`${guide.title} ${guide.name}`} loading="lazy" /></div><div className="guide-quote"><blockquote>"The sighting is only the beginning. My work is to help you understand what led to it."</blockquote><p>{guide.name} / {guide.title}</p><dl><div><dt>In the field</dt><dd>{guide.yearsInField} years</dd></div><div><dt>Speciality</dt><dd>{guide.speciality}</dd></div><div><dt>Languages</dt><dd>{guide.languages?.length ? guide.languages.join(", ") : "—"}</dd></div></dl></div></div>
+        ) : hasCloudBackend ? (
+          <div className="guide-empty" data-reveal><p>Our guiding team is being updated. Published guides appear here instantly across every device once added in the CMS.</p></div>
+        ) : (
+          <div className="guide-feature"><div className="guide-portrait"><img src={imagery.portrait} alt="Senior safari guide Daniel Ole Nkoitoi" loading="lazy" /></div><div className="guide-quote"><blockquote>"The sighting is only the beginning. My work is to help you understand what led to it."</blockquote><p>Daniel Ole Nkoitoi / Senior guide, Maasai Mara</p><dl><div><dt>In the field</dt><dd>19 years</dd></div><div><dt>Speciality</dt><dd>Predator behaviour</dd></div><div><dt>Languages</dt><dd>Maa, Swahili, English</dd></div></dl></div></div>
+        )}
+      </section>
       <section className="impact section-pad"><SectionHeading number="04" eyebrow="CONSERVATION" title="Travel can keep wild land wild." text="We work with conservancies, not around them. A transparent contribution from every guest funds habitat leases and locally chosen projects." /><div className="impact-lines"><p data-reveal><strong>Land</strong> Long-term leases protect migration corridors beyond national park borders.</p><p data-reveal><strong>People</strong> Local guide fellowships and supplier partnerships build durable livelihoods.</p><p data-reveal><strong>Wildlife</strong> Predator-proof bomas reduce conflict between herders and carnivores.</p></div><div className="awards-line"><span>Recognised by</span><strong>Conde Nast Traveller</strong><strong>Travel + Leisure</strong><strong>Safari Awards Africa</strong><strong>B Corp Pending</strong></div><MagneticButton className="button button--dark" onClick={() => navigate("contact")}>Travel with purpose <ArrowRight size={17} /></MagneticButton></section>
     </>
   );
@@ -518,13 +530,26 @@ function usePublishedSafaris(): Safari[] {
 }
 
 /**
- * Destination list for the public map and destinations page. Reads the CMS's
- * published destinations from the shared store (Supabase public.destinations);
- * the bundled seed only appears when the database is unreachable (demo mode).
+ * Destination list for the public map and destinations page. Supabase is the
+ * single source of truth. The bundled seed (`src/data.ts`) is ONLY used when
+ * no cloud backend is configured (demo / offline mode); when a cloud backend
+ * is present an empty database MUST render the empty state, never the bundled
+ * demo. This prevents silent demo-data fallback that masks a broken query.
  */
 function useDestinations(): Destination[] {
   const cmsDestinations = useCmsStore((state) => state.publicDestinations);
   return useMemo(() => {
+    if (hasCloudBackend) {
+      return cmsDestinations.map((d) => ({
+        name: d.name,
+        country: d.country,
+        coordinates: d.coordinates,
+        best: d.bestTime,
+        animal: d.animal,
+        image: d.image,
+        description: d.description,
+      }));
+    }
     if (cmsDestinations.length === 0) return destinations;
     return cmsDestinations.map((d) => ({
       name: d.name,
@@ -549,13 +574,22 @@ function usePublicGuides() {
 
 /**
  * Gallery images for the Field Notes archive. Reads published media assets
- * from the shared store (Supabase public.media_assets); the bundled seed
- * gallery is only the offline fallback.
+ * from the shared store (Supabase public.media_assets). Supabase is the single
+ * source of truth; the bundled seed is ONLY the demo-mode fallback when no
+ * cloud backend is configured.
  */
 function useGalleryItems() {
   const cmsMedia = useCmsStore((state) => state.publicMedia);
   return useMemo(() => {
     const images = cmsMedia.filter((m) => m.type === "image" && !m.archived);
+    if (hasCloudBackend) {
+      return images.map((m) => ({
+        src: m.url,
+        alt: m.alt || m.name,
+        type: m.category || "Wildlife",
+        size: (m.dimensions && m.dimensions.width > m.dimensions.height ? "wide" : "tall") as "tall" | "wide",
+      }));
+    }
     if (images.length === 0) return galleryItems;
     return images.map((m) => ({
       src: m.url,
@@ -570,10 +604,25 @@ function ExperiencesPage({ openSafari, onBook }: { openSafari: (safari: Safari) 
   const [region, setRegion] = useState("All");
   const liveSafaris = usePublishedSafaris();
   const visible = liveSafaris.filter((safari) => region === "All" || safari.region.includes(region));
+  if (liveSafaris.length === 0) {
+    return (
+      <>
+        <PageHero eyebrow="PRIVATE SAFARIS" title="Journeys measured in moments." text="Eight signature routes, each privately guided and shaped around your pace." image={imagery.cheetah} />
+        <section className="experiences-intro section-pad">
+          <SectionHeading number="01" eyebrow="THE COLLECTION" title="A starting point, never a fixed itinerary." text="Choose the feeling that draws you. We will tailor the route, camps and rhythm to the season and the people travelling." />
+          <div className="journal-empty" data-reveal>
+            <p className="eyebrow">NO SAFARIS PUBLISHED</p>
+            <h3>Safaris are being crafted.</h3>
+            <p>Published safari packages from the CMS appear here instantly across every device.</p>
+          </div>
+        </section>
+      </>
+    );
+  }
   return (
     <><PageHero eyebrow="PRIVATE SAFARIS" title="Journeys measured in moments." text="Eight signature routes, each privately guided and shaped around your pace." image={imagery.cheetah} /><section className="experiences-intro section-pad"><SectionHeading number="01" eyebrow="THE COLLECTION" title="A starting point, never a fixed itinerary." text="Choose the feeling that draws you. We will tailor the route, camps and rhythm to the season and the people travelling." /><div className="filter-bar" aria-label="Filter safaris by region"><Filter size={15} />{["All", "Serengeti", "Maasai Mara", "Tanzania"].map((item) => <button key={item} className={region === item ? "active" : ""} onClick={() => setRegion(item)}>{item}</button>)}</div></section>
       <section className="experience-catalogue">{visible.map((safari, index) => <article className="experience-item" key={safari.id} data-reveal><button className="experience-image" onClick={() => openSafari(safari)} aria-label={`View ${safari.title}`}><img src={safari.image} alt={`${safari.title} in ${safari.region}`} loading="lazy" /><span>View journey <ArrowRight /></span></button><div className="experience-number">{String(index + 1).padStart(2, "0")}</div><div className="experience-info"><p>{safari.region}</p><h2>{safari.title}</h2><p>{safari.summary}</p><dl><div><dt>Time</dt><dd>{safari.duration}</dd></div><div><dt>From</dt><dd>{formatCurrency(safari.price)} pp</dd></div><div><dt>Season</dt><dd>{safari.availability.slice(0, 4).join(" / ")}</dd></div></dl><div className="experience-actions"><button className="text-link" onClick={() => openSafari(safari)}>View details <ArrowRight size={16} /></button><button className="text-link" onClick={() => onBook(safari)}>Book now <ArrowRight size={16} /></button></div></div></article>)}</section>
-      <section className="bespoke-banner"><div><p className="eyebrow">SOMETHING ELSE IN MIND?</p><h2>Let us make the map around you.</h2><p>Tell us what you love, who is travelling and how you want to feel. We will begin with a blank page.</p></div><MagneticButton className="button button--sand" onClick={() => onBook(liveSafaris[0])}>Create a bespoke safari <ArrowRight size={17} /></MagneticButton></section></>
+      <section className="bespoke-banner"><div><p className="eyebrow">SOMETHING ELSE IN MIND?</p><h2>Let us make the map around you.</h2><p>Tell us what you love, who is travelling and how you want to feel. We will begin with a blank page.</p></div><MagneticButton className="button button--sand" onClick={() => liveSafaris[0] && onBook(liveSafaris[0])}>Create a bespoke safari <ArrowRight size={17} /></MagneticButton></section></>
   );
 }
 
@@ -586,12 +635,29 @@ function DestinationsPage({ onBook }: { onBook: (safari: Safari) => void }) {
   const liveSafaris = usePublishedSafaris();
   const destinationList = useDestinations();
   const [country, setCountry] = useState<"All" | "Kenya" | "Tanzania">("All");
-  const [selected, setSelected] = useState(destinationList[0]);
+  const [selected, setSelected] = useState<Destination | null>(destinationList[0] ?? null);
   const list = useMemo(() => destinationList.filter((destination) => country === "All" || destination.country === country), [country, destinationList]);
-  useEffect(() => { if (!list.some((item) => item.name === selected.name)) setSelected(list[0]); }, [list, selected.name]);
+  useEffect(() => {
+    if (selected && !list.some((item) => item.name === selected.name)) setSelected(list[0] ?? null);
+    if (!selected && list.length > 0) setSelected(list[0]);
+  }, [list, selected]);
+  if (destinationList.length === 0) {
+    return (
+      <>
+        <PageHero eyebrow="KENYA + TANZANIA" title="The map is only the beginning." text="From volcanic highlands to endless grassland, explore the places that shape our journeys." image={imagery.mara} />
+        <section className="destinations-map-section destinations-empty section-pad">
+          <div className="journal-empty" data-reveal>
+            <p className="eyebrow">NO DESTINATIONS YET</p>
+            <h3>Destinations are being curated.</h3>
+            <p>Published destinations from the CMS appear here instantly across every device.</p>
+          </div>
+        </section>
+      </>
+    );
+  }
   return (
-    <><PageHero eyebrow="KENYA + TANZANIA" title="The map is only the beginning." text="From volcanic highlands to endless grassland, explore the places that shape our journeys." image={imagery.mara} /><section className="destinations-map-section"><div className="map-side"><p className="eyebrow">01 / EXPLORE EAST AFRICA</p><h2 className="split-reveal">Move through the wild.</h2><div className="country-switch">{(["All", "Kenya", "Tanzania"] as const).map((item) => <button key={item} onClick={() => setCountry(item)} className={country === item ? "active" : ""}>{item}</button>)}</div><div className="destination-list">{list.map((item) => <button key={item.name} className={selected.name === item.name ? "active" : ""} onClick={() => setSelected(item)}><span>{item.country}</span>{item.name}<ArrowRight /></button>)}</div></div><SafariMap selected={selected} onSelect={setSelected} /><AnimatePresence mode="wait"><motion.div className="destination-focus" key={selected.name} initial={{ opacity: 0, y: 25 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -15 }}><img src={selected.image} alt={`${selected.name} landscape`} /><div><p>{selected.country}</p><h3>{selected.name}</h3><p>{selected.description}</p><dl><div><dt>Best time</dt><dd>{selected.best}</dd></div><div><dt>Known for</dt><dd>{selected.animal}</dd></div></dl></div></motion.div></AnimatePresence></section>
-      <section className="destination-editorial section-pad"><SectionHeading number="02" eyebrow="TWO COUNTRIES, ONE ECOSYSTEM" title="Cross the border. Keep the story whole." text="The migration ignores national lines. Combining Kenya and Tanzania reveals the full movement of herds, weather and seasons." /><div className="country-stories"><article><ImageReveal src={imagery.lion} alt="Lion in the Maasai Mara" /><span>KENYA</span><h3>Intimate conservancies and the open Mara.</h3><p>Night drives, walking and fewer vehicles beyond reserve boundaries.</p></article><article><ImageReveal src={imagery.crater} alt="Wildebeest on Tanzania grassland" /><span>TANZANIA</span><h3>Scale that changes your sense of distance.</h3><p>The Serengeti, crater highlands and elephant paths of Tarangire.</p></article></div></section><section className="map-cta"><p>Not sure where the season will take you?</p><h2>Let the wildlife choose the route.</h2><MagneticButton className="button button--sand" onClick={() => onBook(liveSafaris[0])}>Talk to a safari designer <ArrowRight size={17} /></MagneticButton></section></>
+    <><PageHero eyebrow="KENYA + TANZANIA" title="The map is only the beginning." text="From volcanic highlands to endless grassland, explore the places that shape our journeys." image={imagery.mara} /><section className="destinations-map-section"><div className="map-side"><p className="eyebrow">01 / EXPLORE EAST AFRICA</p><h2 className="split-reveal">Move through the wild.</h2><div className="country-switch">{(["All", "Kenya", "Tanzania"] as const).map((item) => <button key={item} onClick={() => setCountry(item)} className={country === item ? "active" : ""}>{item}</button>)}</div><div className="destination-list">{list.map((item) => <button key={item.name} className={selected?.name === item.name ? "active" : ""} onClick={() => setSelected(item)}><span>{item.country}</span>{item.name}<ArrowRight /></button>)}</div></div>{selected ? <><SafariMap selected={selected} onSelect={setSelected} /><AnimatePresence mode="wait"><motion.div className="destination-focus" key={selected.name} initial={{ opacity: 0, y: 25 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -15 }}><img src={selected.image} alt={`${selected.name} landscape`} /><div><p>{selected.country}</p><h3>{selected.name}</h3><p>{selected.description}</p><dl><div><dt>Best time</dt><dd>{selected.best}</dd></div><div><dt>Known for</dt><dd>{selected.animal}</dd></div></dl></div></motion.div></AnimatePresence></> : null}</section>
+      <section className="destination-editorial section-pad"><SectionHeading number="02" eyebrow="TWO COUNTRIES, ONE ECOSYSTEM" title="Cross the border. Keep the story whole." text="The migration ignores national lines. Combining Kenya and Tanzania reveals the full movement of herds, weather and seasons." /><div className="country-stories"><article><ImageReveal src={imagery.lion} alt="Lion in the Maasai Mara" /><span>KENYA</span><h3>Intimate conservancies and the open Mara.</h3><p>Night drives, walking and fewer vehicles beyond reserve boundaries.</p></article><article><ImageReveal src={imagery.crater} alt="Wildebeest on Tanzania grassland" /><span>TANZANIA</span><h3>Scale that changes your sense of distance.</h3><p>The Serengeti, crater highlands and elephant paths of Tarangire.</p></article></div></section><section className="map-cta"><p>Not sure where the season will take you?</p><h2>Let the wildlife choose the route.</h2><MagneticButton className="button button--sand" onClick={() => liveSafaris[0] && onBook(liveSafaris[0])}>Talk to a safari designer <ArrowRight size={17} /></MagneticButton></section></>
   );
 }
 

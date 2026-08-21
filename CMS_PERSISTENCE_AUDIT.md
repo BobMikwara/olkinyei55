@@ -174,3 +174,34 @@ Functional checks:
 - session-restore hint + Supabase auth storage — credentials/session, never content.
 - demo-mode localStorage content — only active when **no** Supabase backend is
   configured (the documented design-review fallback).
+
+---
+
+## 8. 2026-08-21 Hardening — eliminate silent demo-data fallbacks
+
+**Problem found on second audit:** three public hooks still returned bundled `src/data.ts` demo arrays even when a cloud backend was configured (`hasCloudBackend === true`). An empty `publicDestinations`, `publicMedia`, or `publicBlogPosts` table (e.g. after `DELETE` or RLS mis-configuration) was silently masked by the seed, so a CMS delete or a broken query looked like it never happened — exactly the global-sync failure mode the original fix was meant to remove.
+
+Same issue in `src/admin/store.ts`: the `loadCloud*` loaders for `packages`, `destinations`, `guides`, `vehicles`, `customers`, and `media` returned early on an empty result (`if (!data || data.length===0) return`) and kept the in-memory demo seed. A database that truthfully contained zero rows kept showing the six demo parks, four demo guides, etc.
+
+**Fix:**
+
+* `src/App.tsx`
+  * `useDestinations()`, `useGalleryItems()`, `usePublishedSafaris()` and the Home `publishedPosts` selector now branch on `hasCloudBackend`. Cloud mode **never** falls back — it maps the live array even when empty, rendering the correct empty state. Demo fallback (`destinations` / `galleryItems` / `blogPosts`) only runs when `!hasCloudBackend` (documented offline/demo mode).
+  * `AboutPage` no longer hard-codes *Daniel Ole Nkoitoi* when `publicGuides` is empty. Cloud empty → explicit empty message; demo empty → demo guide.
+  * `ExperiencesPage` and `DestinationsPage` render explicit empty states when their live collections are empty and guard `liveSafaris[0]` dereferences.
+  * `SafariMap` / `DestinationsPage` `selected` state is now `Destination|null` with null-safe rendering.
+
+* `src/admin/store.ts`
+  * `loadState()` (cloud branch) now seeds `public*` slices as empty arrays, so the first paint in cloud mode never flashes demo content before the DB responds.
+  * `persist()` in cloud mode persists only `{theme, currentUserId, session}` — never CMS collections.
+  * All `loadCloud*` staff loaders now clear the seed when the DB returns `[]` or `null` (`data = []` → `map` → `[]`) and `emit()`, instead of `return`-ing and keeping the seed. Added `[CMS] *CloudSave failed` console errors with table + id.
+
+* `src/lib/cms.ts` *(new)*
+  * Central, single-source-of-truth data-access layer exposing `getSiteSettings/updateSiteSettings`, `getPages/updatePages`, `getPackages/createPackage/updatePackage/deletePackage`, `getDestinations…`, `getGuides…`, `getVehicles…`, `getCustomers…`, `getMediaAssets…`, `getBlogPosts…`, `getTestimonials…`, `getBookings…`, and `subscribeToCmsTables` (one channel for all tables, preventing conflicting subscriptions).
+  * Every function uses `supabasePublic` for `published=true` reads (so anon RLS is always exercised) and `supabase` for writes, throws on error, and logs `[CMS] operation failed — table=… id=…: message`.
+
+* `vercel.json`
+  * `index.html` and `/` are now `no-store` (`Cache-Control`, `CDN-Cache-Control`, `Vercel-CDN-Cache-Control`) so a Vercel edge cache never serves stale CMS content. CMS reads are always fresh Supabase queries; realtime keeps open tabs live.
+
+**Result:** `hasCloudBackend ? Supabase : demo` is now enforced at every layer — initial state, persistence, loaders, hooks, and HTTP cache — with no silent `|| demoData` or `length ? data : fallback` paths surviving in cloud mode.
+

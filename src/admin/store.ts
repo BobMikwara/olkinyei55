@@ -294,7 +294,28 @@ function loadState(): StoreState {
         session = saved.session ?? null;
       }
     } catch { /* ignore corrupt storage */ }
-    return { ...seedState(), theme, currentUserId, session };
+    // In cloud mode the database is the single source of truth. Public slices
+    // must start empty so a successful empty response never flashes stale demo
+    // content. Staff slices also start from the seed but will be replaced by
+    // the database on bootstrap; see loadCloud* which now correctly clears
+    // when the database returns zero rows instead of keeping the seed.
+    const base = seedState();
+    return {
+      ...base,
+      // Public website: never show seed demo when a cloud backend is present
+      publicPackages: [],
+      publicDestinations: [],
+      publicGuides: [],
+      publicMedia: [],
+      publicBlogPosts: [],
+      publicTestimonials: [],
+      publicPages: [],
+      // Keep site defaults until cms_content loads, but publicSiteSettings
+      // will be replaced immediately once the DB responds.
+      theme,
+      currentUserId,
+      session,
+    };
   }
 
   try {
@@ -532,7 +553,20 @@ function persistedStateSnapshot(current: StoreState): Omit<StoreState, "publicPa
 }
 
 function persist() {
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(persistedStateSnapshot(state))); }
+  try {
+    if (hasCloudBackend) {
+      // Cloud is the single source of truth for content. Persist ONLY
+      // non-content preferences and the session hint — never CMS collections.
+      const minimal = {
+        theme: state.theme,
+        currentUserId: state.currentUserId,
+        session: state.session,
+      };
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(minimal));
+      return;
+    }
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(persistedStateSnapshot(state)));
+  }
   catch { /* ignore quota errors */ }
 }
 
@@ -1168,10 +1202,13 @@ async function loadCloudPackages(options: { force?: boolean } = {}): Promise<voi
       ({ data, error } = await client.from("packages").select("*").order("updated_at", { ascending: false }));
     }
     if (error) throw new Error(error.message);
-    if (!data || data.length === 0) return;
+    // In cloud mode an empty database MUST clear the demo seed; never
+    // silently keep bundled data that masks a truthful empty state.
+    if (!data) data = [];
     state = { ...state, packages: (data as DbPackageRow[]).map(packageFromRow) };
     emit();
     if (import.meta.env.DEV) console.debug(`[Olkinyei] Packages synced (staff): ${data.length}`);
+    return;
   } catch (error) {
     packagesBootstrapped = false;
     console.error(
@@ -1830,7 +1867,7 @@ async function loadCloudDestinations(options: { force?: boolean } = {}): Promise
   try {
     const { data, error } = await client.from("destinations").select("*").order("name", { ascending: true });
     if (error) throw new Error(error.message);
-    if (!data || data.length === 0) return;
+    if (!data) { state = { ...state, destinations: [] }; emit(); return; }
     state = { ...state, destinations: (data as DbDestinationRow[]).map(destinationFromRow) };
     emit();
     if (import.meta.env.DEV) console.debug(`[Olkinyei] Destinations synced (staff): ${data.length}`);
@@ -1907,6 +1944,7 @@ async function destinationCloudSave(d: Destination): Promise<void> {
     );
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    console.error("[CMS] destinationCloudSave failed:", message, { id: d.id });
     throw new Error(`The database rejected the change: ${message.slice(0, 160)}`);
   }
 }
@@ -1939,7 +1977,7 @@ async function loadCloudGuides(options: { force?: boolean } = {}): Promise<void>
   try {
     const { data, error } = await client.from("guides").select("*").order("name", { ascending: true });
     if (error) throw new Error(error.message);
-    if (!data || data.length === 0) return;
+    if (!data) { state = { ...state, guides: [] }; emit(); return; }
     state = { ...state, guides: (data as DbGuideRow[]).map(guideFromRow) };
     emit();
     if (import.meta.env.DEV) console.debug(`[Olkinyei] Guides synced (staff): ${data.length}`);
@@ -2016,6 +2054,7 @@ async function guideCloudSave(g: Guide): Promise<void> {
     );
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    console.error("[CMS] guideCloudSave failed:", message, { id: g.id });
     throw new Error(`The database rejected the change: ${message.slice(0, 160)}`);
   }
 }
@@ -2031,7 +2070,7 @@ async function loadCloudVehicles(options: { force?: boolean } = {}): Promise<voi
   try {
     const { data, error } = await client.from("vehicles").select("*").order("fleet_code", { ascending: true });
     if (error) throw new Error(error.message);
-    if (!data || data.length === 0) return;
+    if (!data) { state = { ...state, vehicles: [] }; emit(); return; }
     state = { ...state, vehicles: (data as DbVehicleRow[]).map(vehicleFromRow) };
     emit();
   } catch (error) {
@@ -2065,6 +2104,7 @@ async function vehicleCloudSave(v: Vehicle): Promise<void> {
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    console.error("[CMS] vehicleCloudSave failed:", message, { id: v.id });
     throw new Error(`The database rejected the change: ${message.slice(0, 160)}`);
   }
 }
@@ -2080,7 +2120,7 @@ async function loadCloudCustomers(options: { force?: boolean } = {}): Promise<vo
   try {
     const { data, error } = await client.from("customers").select("*").order("name", { ascending: true });
     if (error) throw new Error(error.message);
-    if (!data || data.length === 0) return;
+    if (!data) { state = { ...state, customers: [] }; emit(); return; }
     state = { ...state, customers: (data as DbCustomerRow[]).map(customerFromRow) };
     emit();
   } catch (error) {
@@ -2114,6 +2154,7 @@ async function customerCloudSave(c: Customer): Promise<void> {
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    console.error("[CMS] customerCloudSave failed:", message, { id: c.id });
     throw new Error(`The database rejected the change: ${message.slice(0, 160)}`);
   }
 }
@@ -2130,7 +2171,7 @@ async function loadCloudMedia(options: { force?: boolean } = {}): Promise<void> 
   try {
     const { data, error } = await client.from("media_assets").select("*").order("created_at", { ascending: false });
     if (error) throw new Error(error.message);
-    if (!data || data.length === 0) return;
+    if (!data) { state = { ...state, media: [] }; emit(); return; }
     state = { ...state, media: (data as DbMediaRow[]).map(mediaFromRow) };
     emit();
   } catch (error) {
@@ -2202,6 +2243,7 @@ async function mediaCloudSave(m: MediaAsset): Promise<void> {
     );
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    console.error("[CMS] mediaCloudSave failed:", message, { id: m.id });
     throw new Error(`The database rejected the change: ${message.slice(0, 160)}`);
   }
 }
