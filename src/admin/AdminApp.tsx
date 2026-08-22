@@ -120,8 +120,14 @@ export function SettingsManager() {
   // when the admin has not started editing — otherwise a late DB response
   // would silently discard in-progress changes.
   useEffect(() => {
-    setForm((current) => settingsEqual(current, saved) ? current : (dirty ? current : structuredClone(saved)));
-  }, [saved, dirty]);
+    // `dirty` is intentionally captured without being a dependency: this effect
+    // only needs to react to a persisted settings change. Running it on every
+    // keystroke would JSON.stringify the (possibly large) robots/logo values
+    // for no benefit.
+    setForm((current) => settingsEqual(current, saved)
+      ? current
+      : (dirty ? current : structuredClone(saved)));
+  }, [saved]);
   return <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
     <PageHeader eyebrow="Global configuration" title="Site settings" description="Manage the identity and operating details shared by the public website." actions={<><Button variant="outline" icon={Eye} onClick={() => { window.location.hash = ""; window.location.reload(); }}>Preview</Button><Button icon={Save} onClick={save} loading={saving} disabled={saving}>{saving ? "Saving…" : "Save changes"}</Button></>} />
     <div className="mb-6 flex gap-1 border-b border-[var(--admin-border)]">{(["brand", "contact", "analytics", "advanced"] as const).map((item) => <button key={item} onClick={() => setTab(item)} className={`relative px-4 py-3 text-xs capitalize ${tab === item ? "text-[var(--admin-fg)]" : "text-[var(--admin-fg-muted)]"}`}>{item}{tab === item && <motion.span layoutId="settings-tab" className="absolute inset-x-0 bottom-0 h-px bg-[var(--admin-accent)]" />}</button>)}</div>
