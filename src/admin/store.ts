@@ -698,25 +698,68 @@ async function loadPublicCmsContent(options: { force?: boolean; requireSuccess?:
   }
 }
 
-let cloudSaveQueue: Promise<void> = Promise.resolve();
+let cloudSaveQueue: Promise<unknown> = Promise.resolve();
 
+/**
+ * Writes one CMS document to `public.cms_content` and re-reads the public
+ * copy so the website reflects the change immediately.
+ *
+ * Two failure modes used to be invisible here and are now explicit:
+ *
+ *  1. No Supabase client. The function used to resolve successfully, so the
+ *     caller reported "saved on all devices" while nothing was written. A
+ *     misconfigured build must fail loudly instead.
+ *  2. A poisoned save queue. `cloudSaveQueue` was reassigned to the rejected
+ *     promise of a failed save, and `rejected.then(cb)` never runs `cb` — so
+ *     after a single failure (an expired session, one dropped request) EVERY
+ *     later save short-circuited to the old error without contacting the
+ *     database at all. The queue is now always continued from a settled,
+ *     non-rejecting link.
+ */
 async function cloudSaveDocument(id: "site_settings" | "pages", content: unknown): Promise<void> {
   const client = supabase;
   if (!client) {
     cmsContentBootstrapped = false;
     publicCmsContentBootstrapped = false;
-    return;
+    throw new Error(cloudUnavailableReason() || "Supabase is not configured, so this change cannot be saved.");
   }
-  cloudSaveQueue = cloudSaveQueue.then(async () => {
+  const run = cloudSaveQueue.then(async () => {
     const { error } = await client
       .from(TABLES.cmsContent)
-      .upsert({ id, content, updated_at: new Date().toISOString() })
+      .upsert({ id, content }, { onConflict: "id" })
       .select("id")
       .single();
-    if (error) throw error;
+    if (error) {
+      // Surface the underlying PostgREST detail (RLS denial, constraint,
+      // network) instead of a generic message.
+      throw new Error(cmsWriteErrorMessage(id, error));
+    }
+    // Confirm the write is readable through the ANONYMOUS client the public
+    // website uses. A row that staff can write but visitors cannot read is
+    // still a broken save, so this failure must reach the caller.
     await loadPublicCmsContent({ force: true, requireSuccess: true });
+    // Keep the staff copy authoritative too, so a CMS refresh is not needed.
+    cmsContentBootstrapped = false;
+    await loadCloudCmsContent({ force: true });
   });
-  return cloudSaveQueue;
+  // Never leave a rejected promise as the queue head.
+  cloudSaveQueue = run.catch(() => undefined);
+  return run;
+}
+
+/** Turns a PostgREST error into an actionable, non-generic message. */
+function cmsWriteErrorMessage(id: string, error: { code?: string; message?: string; details?: string | null; hint?: string | null }): string {
+  const base = error.message || "The database rejected the write.";
+  if (error.code === "42501" || /row-level security/i.test(base)) {
+    return `${base} Your account is not recognised as active staff, so Supabase blocked the write to cms_content (${id}). Sign out and in again, or ask the Root Super Admin to confirm your profile is active.`;
+  }
+  if (error.code === "23514") {
+    return `${base} The cms_content id "${id}" is not permitted by the table's check constraint.`;
+  }
+  if (error.code === "PGRST301" || /jwt/i.test(base)) {
+    return `${base} Your session has expired — sign in again and retry the save.`;
+  }
+  return base;
 }
 
 // ============ Blog post schema mapping (CMS ⇆ Supabase blog_posts) ============
@@ -2662,7 +2705,12 @@ const actions = {
     vehiclesBootstrapped = false;
     customersBootstrapped = false;
     mediaBootstrapped = false;
+    // Site settings and pages live in cms_content and are read with the same
+    // anonymous-then-authenticated pattern. Without this reset a stale copy
+    // fetched before sign-in would keep overwriting the editor's form.
+    cmsContentBootstrapped = false;
     await Promise.all([
+      loadCloudCmsContent({ force: true }),
       loadCloudTestimonials(),
       loadCloudPackages(),
       loadCloudBlogPosts(),
@@ -3737,25 +3785,52 @@ const actions = {
   },
 
   // Pages
-  updatePage(id: string, patch: Partial<PageSettings>) {
+  async updatePage(id: string, patch: Partial<PageSettings>): Promise<void> {
     const p = state.pages.find((x) => x.id === id);
     if (!p) return;
-    state = { ...state, pages: state.pages.map((x) => x.id === id ? { ...x, ...patch, updatedAt: new Date().toISOString(), updatedBy: currentUser()?.id ?? "" } : x) };
+    const previous = state.pages;
+    const nextPages = previous.map((x) => x.id === id ? { ...x, ...patch, updatedAt: new Date().toISOString(), updatedBy: currentUser()?.id ?? "" } : x);
+    state = { ...state, pages: nextPages };
     logActivity(patch.published === false ? "archived" : "updated", "Page", id, p.title);
     emit();
-    void cloudSaveDocument("pages", state.pages)
-      .then(() => notify({ type: "success", title: "Page updated", message: `${p.title} saved.` }))
-      .catch((error) => notify({ type: "error", title: "Page save failed", message: error instanceof Error ? error.message : "Could not publish this page." }));
+    try {
+      await cloudSaveDocument("pages", nextPages);
+      notify({ type: "success", title: "Page updated", message: `${p.title} saved.` });
+    } catch (error) {
+      state = { ...state, pages: previous };
+      emit();
+      const message = error instanceof Error ? error.message : "Could not publish this page.";
+      notify({ type: "error", title: "Page save failed", message, duration: 12000 });
+      console.error("[Olkinyei] Page save failed:", error);
+      throw error instanceof Error ? error : new Error(message);
+    }
   },
 
-  // Site Settings — logo, brand colors, tagline, contact info, analytics.
-  updateSiteSettings(patch: Partial<SiteSettings>) {
-    state = { ...state, siteSettings: { ...state.siteSettings, ...patch } };
+  // Site Settings — logo, brand colors, tagline, contact info, analytics,
+  // maintenance mode and coming soon.
+  //
+  // Returns a promise so the Settings screen can await the round trip and show
+  // a real saving/failed state. The optimistic local update is rolled back
+  // when the database rejects the write, so the CMS can never keep showing a
+  // value the website will not serve.
+  async updateSiteSettings(patch: Partial<SiteSettings>): Promise<void> {
+    const previous = state.siteSettings;
+    const next = { ...previous, ...patch };
+    state = { ...state, siteSettings: next };
     logActivity("updated", "Site Settings", "global", "Global site settings");
     emit();
-    void cloudSaveDocument("site_settings", state.siteSettings)
-      .then(() => notify({ type: "success", title: "Settings saved", message: "Global site settings updated on all devices." }))
-      .catch((error) => notify({ type: "error", title: "Settings save failed", message: error instanceof Error ? error.message : "Could not publish site settings." }));
+    try {
+      await cloudSaveDocument("site_settings", next);
+      notify({ type: "success", title: "Settings saved", message: "Global site settings updated on all devices." });
+    } catch (error) {
+      // Roll back so the form never displays an unsaved value as saved.
+      state = { ...state, siteSettings: previous };
+      emit();
+      const message = error instanceof Error ? error.message : "Could not publish site settings.";
+      notify({ type: "error", title: "Settings save failed", message, duration: 12000 });
+      console.error("[Olkinyei] Site settings save failed:", error);
+      throw error instanceof Error ? error : new Error(message);
+    }
   },
 
   resetDemoData() {

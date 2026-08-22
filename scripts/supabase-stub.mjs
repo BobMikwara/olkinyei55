@@ -14,8 +14,17 @@
 // difficulty, tags, featured, published, archived, coordinates, seo_title,
 // seo_description, publish_date, created_at, updated_at.
 //
+// It also stores the two CMS documents exactly like public.cms_content
+// (supabase/cms_content.sql): id text primary key ('site_settings' | 'pages'),
+// content jsonb, updated_at timestamptz — with PostgREST upsert semantics so
+// the Settings save/load round trip can be verified end to end.
+//
 // Control endpoints (for failure-mode testing and request assertions):
 //   POST /__control  { failPackages: true|false }   -> toggle RLS-like 500s
+//                    { failCmsWrite: true|false }   -> RLS-denied cms writes
+//                    { failCmsRead:  true|false }   -> broken cms reads
+//   GET  /__cms_content                             -> current stored documents
+//   POST /__cms_content { id, content }             -> seed a document directly
 //   GET  /__requests                                -> recent request log
 //   POST /__reset                                   -> clear log, reset mode
 //
@@ -234,9 +243,24 @@ const packages = [
   },
 ];
 
-const EMPTY_TABLES = ["cms_content", "blog_posts", "testimonials", "destinations", "guides", "media_assets", "vehicles", "customers", "bookings"];
+const EMPTY_TABLES = ["blog_posts", "testimonials", "destinations", "guides", "media_assets", "vehicles", "customers", "bookings"];
+
+// --- public.cms_content (supabase/cms_content.sql) --------------------------
+// Seeded exactly like the migration: two rows, empty documents.
+const cmsContent = new Map([
+  ["site_settings", { id: "site_settings", content: {}, updated_at: now }],
+  ["pages", { id: "pages", content: [], updated_at: now }],
+]);
+
+function resetCmsContent() {
+  cmsContent.clear();
+  cmsContent.set("site_settings", { id: "site_settings", content: {}, updated_at: new Date().toISOString() });
+  cmsContent.set("pages", { id: "pages", content: [], updated_at: new Date().toISOString() });
+}
 
 let failPackages = false;
+let failCmsWrite = false;
+let failCmsRead = false;
 const requests = [];
 
 function sortRows(rows, orderParam) {
@@ -275,19 +299,25 @@ const server = http.createServer((req, res) => {
 
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Headers", "authorization, apikey, content-type, x-client-info, prefer");
-  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, PATCH, PUT, DELETE, OPTIONS");
 
   if (req.method === "OPTIONS") { res.writeHead(204); res.end(); return; }
 
-  if (req.method === "POST" && path === "/__control") {
+  const readBody = () => new Promise((resolve) => {
     let body = "";
     req.on("data", (chunk) => { body += chunk; });
-    req.on("end", () => {
+    req.on("end", () => resolve(body));
+  });
+
+  if (req.method === "POST" && path === "/__control") {
+    void readBody().then((body) => {
       try {
         const control = JSON.parse(body || "{}");
         if (typeof control.failPackages === "boolean") failPackages = control.failPackages;
+        if (typeof control.failCmsWrite === "boolean") failCmsWrite = control.failCmsWrite;
+        if (typeof control.failCmsRead === "boolean") failCmsRead = control.failCmsRead;
         res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ ok: true, failPackages }));
+        res.end(JSON.stringify({ ok: true, failPackages, failCmsWrite, failCmsRead }));
       } catch {
         res.writeHead(400); res.end();
       }
@@ -295,9 +325,33 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  if (path === "/__cms_content") {
+    if (req.method === "GET") {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify([...cmsContent.values()]));
+      return;
+    }
+    if (req.method === "POST") {
+      void readBody().then((body) => {
+        try {
+          const row = JSON.parse(body || "{}");
+          cmsContent.set(row.id, { id: row.id, content: row.content, updated_at: new Date().toISOString() });
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ ok: true }));
+        } catch {
+          res.writeHead(400); res.end();
+        }
+      });
+      return;
+    }
+  }
+
   if (req.method === "POST" && path === "/__reset") {
     requests.length = 0;
     failPackages = false;
+    failCmsWrite = false;
+    failCmsRead = false;
+    resetCmsContent();
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ ok: true }));
     return;
@@ -312,6 +366,86 @@ const server = http.createServer((req, res) => {
   if (path.startsWith("/rest/v1/")) {
     const table = path.replace("/rest/v1/", "").split("?")[0];
     requests.push({ method: req.method, table, query: Object.fromEntries(params) });
+
+    if (table === "cms_content") {
+      const prefer = String(req.headers.prefer ?? "");
+      const wantsObject = String(req.headers.accept ?? "").includes("vnd.pgrst.object");
+
+      if (req.method === "GET") {
+        if (failCmsRead) {
+          res.writeHead(500, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ code: "42501", message: "permission denied for table cms_content", hint: "RLS policy rejected the SELECT", details: null }));
+          return;
+        }
+        const rows = sortRows(filterRows([...cmsContent.values()], params), params.get("order"));
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(rows));
+        return;
+      }
+
+      if (req.method === "POST" || req.method === "PATCH") {
+        void readBody().then((raw) => {
+          if (failCmsWrite) {
+            // Exactly what a failing "Staff can write cms content" policy returns.
+            res.writeHead(403, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ code: "42501", message: 'new row violates row-level security policy for table "cms_content"', hint: null, details: null }));
+            return;
+          }
+          let payload;
+          try { payload = JSON.parse(raw || "{}"); } catch { res.writeHead(400); res.end(); return; }
+          const incoming = Array.isArray(payload) ? payload : [payload];
+          const written = [];
+
+          for (const row of incoming) {
+            const id = row.id ?? (params.get("id") ?? "").replace(/^eq\./, "");
+            // id check constraint from supabase/cms_content.sql.
+            if (id !== "site_settings" && id !== "pages") {
+              res.writeHead(400, { "Content-Type": "application/json" });
+              res.end(JSON.stringify({ code: "23514", message: 'new row for relation "cms_content" violates check constraint "cms_content_id_check"' }));
+              return;
+            }
+            const exists = cmsContent.has(id);
+            if (req.method === "POST" && exists && !prefer.includes("resolution=merge-duplicates")) {
+              res.writeHead(409, { "Content-Type": "application/json" });
+              res.end(JSON.stringify({ code: "23505", message: 'duplicate key value violates unique constraint "cms_content_pkey"' }));
+              return;
+            }
+            if (row.content === undefined && !exists) {
+              res.writeHead(400, { "Content-Type": "application/json" });
+              res.end(JSON.stringify({ code: "23502", message: 'null value in column "content" violates not-null constraint' }));
+              return;
+            }
+            const current = cmsContent.get(id);
+            const next = {
+              id,
+              content: row.content === undefined ? current.content : row.content,
+              // The BEFORE UPDATE trigger overrides any client-supplied value.
+              updated_at: new Date().toISOString(),
+            };
+            cmsContent.set(id, next);
+            written.push(next);
+          }
+
+          if (!prefer.includes("return=representation")) {
+            res.writeHead(204);
+            res.end();
+            return;
+          }
+          const select = params.get("select");
+          const project = (row) => {
+            if (!select || select === "*") return row;
+            const keys = select.split(",").map((key) => key.trim());
+            return Object.fromEntries(keys.map((key) => [key, row[key]]));
+          };
+          const body = written.map(project);
+          res.writeHead(wantsObject ? 200 : 201, {
+            "Content-Type": wantsObject ? "application/vnd.pgrst.object+json" : "application/json",
+          });
+          res.end(JSON.stringify(wantsObject ? body[0] : body));
+        });
+        return;
+      }
+    }
 
     if (table === "packages" && failPackages) {
       // Realistic RLS-denied response, exactly what a broken policy returns.
