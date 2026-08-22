@@ -29,6 +29,7 @@ import {
   Eye,
   Filter,
   Headphones,
+  MapPin,
   Menu,
   Minus,
   Pause,
@@ -546,6 +547,7 @@ function usePublishedSafaris(): Safari[] {
       duration: pkg.duration,
       nights: pkg.nights,
       price: pkg.price,
+      discount: pkg.discount,
       image: pkg.image,
       gallery: pkg.gallery.length > 0 ? pkg.gallery : [pkg.image],
       summary: pkg.summary,
@@ -560,7 +562,12 @@ function usePublishedSafaris(): Safari[] {
       parks: pkg.parks,
       wildlife: pkg.wildlife,
       tags: pkg.tags,
+      difficulty: pkg.difficulty,
       featured: pkg.featured,
+      published: pkg.published,
+      publishDate: pkg.publishDate,
+      createdAt: pkg.createdAt,
+      updatedAt: pkg.updatedAt,
       seo: pkg.seo,
     }));
   }, [cmsPackages]);
@@ -700,7 +707,7 @@ function matchesDestination(safari: Safari, destination: Destination) {
     || Boolean(safari.country?.includes(destination.country));
 }
 
-function SafariDetailPage({ slug, onBack, onBook, openDestination, openSafari }: { slug: string; onBack: () => void; onBook: (safari: Safari) => void; openDestination: (destination: Destination) => void; openSafari: (safari: Safari) => void }) {
+function SafariDetailPage({ slug, onBack, onBook, openDestination, openSafariPage }: { slug: string; onBack: () => void; onBook: (safari: Safari) => void; openDestination: (destination: Destination) => void; openSafariPage: (safari: Safari) => void }) {
   const safaris = usePublishedSafaris();
   const destinationList = useDestinations();
   const safari = safaris.find((item) => (item.slug || item.id) === slug);
@@ -760,13 +767,204 @@ function SafariDetailPage({ slug, onBack, onBook, openDestination, openSafari }:
           {relatedDestinations.length > 0 ? <article className="detail-card" data-reveal><p className="eyebrow">RELATED DESTINATIONS</p><h2>Continue through the landscape</h2><div className="detail-related-list">{relatedDestinations.map((destination) => <button key={destination.slug || destination.name} className="detail-related-item" onClick={() => openDestination(destination)}><span>{destination.country}</span><strong>{destination.name}</strong><ArrowRight size={16} /></button>)}</div></article> : null}
         </div>
 
-        {relatedSafaris.length > 0 ? <section className="detail-related section-pad"><SectionHeading number="02" eyebrow="MORE JOURNEYS" title="Safaris shaped by the same wild rhythm." /><div className="detail-related-cards">{relatedSafaris.map((item) => <article key={item.slug || item.id} className="detail-related-card" data-reveal><img src={item.image} alt="" loading="lazy" /><div><span>{item.region}</span><h3>{item.title}</h3><button className="text-link" onClick={() => openSafari(item)}>Open safari <ArrowRight size={16} /></button></div></article>)}</div></section> : null}
+        {relatedSafaris.length > 0 ? <section className="detail-related section-pad"><SectionHeading number="02" eyebrow="MORE JOURNEYS" title="Safaris shaped by the same wild rhythm." /><div className="detail-related-cards">{relatedSafaris.map((item) => <article key={item.slug || item.id} className="detail-related-card" data-reveal><img src={item.image} alt="" loading="lazy" /><div><span>{item.region}</span><h3>{item.title}</h3><button className="text-link" onClick={() => openSafariPage(item)}>Open safari <ArrowRight size={16} /></button></div></article>)}</div></section> : null}
       </section>
     </>
   );
 }
 
-function DestinationDetailPage({ slug, onBack, openSafari }: { slug: string; onBack: () => void; openSafari: (safari: Safari) => void }) {
+/**
+ * Miniature route map used by the original safari details sheet. It is driven
+ * by the same live Supabase record (parks / region / tags) and only renders
+ * when the fields exist, so nothing is hardcoded.
+ */
+function SafariRouteMap({ safari }: { safari: Safari }) {
+  const stops = useMemo(() => {
+    const places = [...(safari.parks ?? []), ...(safari.country ?? [])];
+    const source = places.length > 0 ? places : (safari.tags?.length ? safari.tags : [safari.region]);
+    return Array.from(new Set(source)).slice(0, 4);
+  }, [safari]);
+  if (stops.length === 0) return null;
+  const stepX = 680 / Math.max(stops.length - 1, 1);
+  const points = stops.map((_, index) => ({ x: 60 + index * stepX, y: index % 2 === 0 ? 112 : 172 }));
+  const path = points.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`).join(" ");
+  return (
+    <div className="route-map">
+      <svg viewBox="0 0 800 280" role="img" aria-label={`Route through ${stops.join(", ")}`}>
+        <path d={path} fill="none" stroke="currentColor" strokeWidth="1.6" strokeDasharray="5 6" opacity=".55" />
+        {points.map((point, index) => (
+          <g key={`${stops[index]}-${index}`}>
+            <circle cx={point.x} cy={point.y} r="4.5" fill="var(--ivory)" stroke="currentColor" strokeWidth="1.4" />
+            <circle cx={point.x} cy={point.y} r="12" fill="none" stroke="currentColor" strokeWidth=".4" opacity=".35" />
+            <text x={point.x} y={point.y - 18} textAnchor="middle">{stops[index]}</text>
+          </g>
+        ))}
+      </svg>
+    </div>
+  );
+}
+
+/**
+ * ORIGINAL Safari "View Details" experience: a full-height right-hand sheet
+ * over a blurred modal backdrop. This component reconnects the interaction to
+ * the live Supabase package record (via the `Safari` object produced by
+ * `usePublishedSafaris`) instead of rendering a separate full-page route.
+ */
+function SafariDetailsSheet({ safari, onClose, onBook, openSafariPage }: {
+  safari: Safari | null;
+  onClose: () => void;
+  onBook: (safari: Safari) => void;
+  openSafariPage: (safari: Safari) => void;
+}) {
+  const [active, setActive] = useState(0);
+  const closeRef = useRef<HTMLButtonElement>(null);
+  const gallery = safari?.gallery.length ? safari.gallery : safari?.image ? [safari.image] : [];
+
+  useEffect(() => {
+    if (!safari) return;
+    setActive(0);
+    const previousBody = document.body.style.overflow;
+    const previousRoot = document.documentElement.style.overflow;
+    document.body.style.overflow = "hidden";
+    document.documentElement.style.overflow = "hidden";
+    const focusTimer = window.setTimeout(() => closeRef.current?.focus(), 80);
+    const closeOnEscape = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.body.style.overflow = previousBody;
+      document.documentElement.style.overflow = previousRoot;
+      window.removeEventListener("keydown", closeOnEscape);
+      window.clearTimeout(focusTimer);
+    };
+  }, [safari?.id || safari?.slug, onClose]);
+
+  if (!safari) return null;
+
+  const facts: Array<{ icon: ReactNode; value: string }> = [];
+  if (safari.duration) facts.push({ icon: <Clock3 size={15} />, value: safari.duration });
+  if (safari.price) facts.push({ icon: <CircleDollarSign size={15} />, value: `${formatCurrency(safari.price)} pp` });
+  if (safari.availability.length) facts.push({ icon: <CalendarDays size={15} />, value: safari.availability.slice(0, 5).join(" / ") });
+  if (safari.difficulty) facts.push({ icon: <Compass size={15} />, value: safari.difficulty });
+  if (safari.country?.length) facts.push({ icon: <MapPin size={15} />, value: safari.country.join(" + ") });
+  if (safari.discount) facts.push({ icon: <ShieldCheck size={15} />, value: `${formatCurrency(safari.discount)} pp` });
+
+  const publishedLabel = safari.publishDate
+    ? `Published ${new Date(safari.publishDate).toLocaleDateString(undefined, { day: "2-digit", month: "long", year: "numeric" })}`
+    : safari.createdAt
+      ? `Published ${new Date(safari.createdAt).toLocaleDateString(undefined, { day: "2-digit", month: "long", year: "numeric" })}`
+      : "Published";
+
+  return (
+    <motion.div
+      className="experience-modal"
+      role="dialog"
+      aria-modal="true"
+      aria-label={`${safari.title} details`}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.35 }}
+      onClick={onClose}
+    >
+      <motion.div
+        className="experience-sheet"
+        role="document"
+        data-lenis-prevent
+        initial={{ x: "100%" }}
+        animate={{ x: 0 }}
+        exit={{ x: "100%" }}
+        transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1] }}
+        onClick={(event) => event.stopPropagation()}
+      >
+        <button ref={closeRef} className="sheet-close" onClick={onClose} aria-label="Close safari details"><X size={20} /></button>
+
+        <div className="sheet-gallery">
+          {gallery[active] ? <img key={gallery[active]} src={gallery[active]} alt={`${safari.title} ${active + 1}`} /> : null}
+          {gallery.length > 1 ? (
+            <div>
+              {gallery.map((image, index) => (
+                <button key={`${image}-${index}`} className={index === active ? "active" : ""} onClick={() => setActive(index)} aria-label={`View gallery image ${index + 1}`}>
+                  <img src={image} alt="" loading="lazy" />
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </div>
+
+        <div className="sheet-content">
+          <p className="eyebrow">{safari.region}</p>
+          <h2>{safari.title}</h2>
+          <p className="sheet-summary">{safari.summary}</p>
+
+          {facts.length > 0 ? (
+            <div className="sheet-facts">
+              {facts.map((fact, index) => <span key={`${fact.value}-${index}`}>{fact.icon}{fact.value}</span>)}
+            </div>
+          ) : null}
+
+          {safari.description ? <p className="sheet-description">{safari.description}</p> : null}
+
+          <SafariRouteMap safari={safari} />
+
+          {safari.signature ? (
+            <div className="signature"><span>Signature moments</span>{safari.signature}</div>
+          ) : null}
+
+          {safari.highlights && safari.highlights.length > 0 ? (
+            <div className="sheet-section">
+              <p className="eyebrow">JOURNEY HIGHLIGHTS</p>
+              <h3>What this safari is really about.</h3>
+              <ul className="detail-list">
+                {safari.highlights.map((item) => <li key={item}><Check size={15} />{item}</li>)}
+              </ul>
+            </div>
+          ) : null}
+
+          {(safari.included.length > 0 || safari.excluded.length > 0) ? (
+            <div className="include-grid">
+              <div>
+                <h3>Included</h3>
+                {safari.included.map((item) => <p key={item}><Check size={14} />{item}</p>)}
+                {safari.included.length === 0 ? <p>Contact us for the full inclusions list.</p> : null}
+              </div>
+              <div>
+                <h3>Not included</h3>
+                {safari.excluded.map((item) => <p key={item}><Minus size={14} />{item}</p>)}
+                {safari.excluded.length === 0 ? <p>International flights and travel insurance.</p> : null}
+              </div>
+            </div>
+          ) : null}
+
+          {(safari.parks?.length || safari.wildlife?.length || safari.tags?.length) ? (
+            <div className="sheet-section">
+              <p className="eyebrow">WHERE THIS SAFARI BELONGS</p>
+              <h3>Places, wildlife and travel codes.</h3>
+              <div className="detail-tag-group">
+                {(safari.parks ?? []).map((park) => <span key={park}>{park}</span>)}
+                {(safari.wildlife ?? []).map((animal) => <span key={animal}>{animal}</span>)}
+                {(safari.tags ?? []).map((tag) => <span key={tag}>{tag}</span>)}
+              </div>
+            </div>
+          ) : null}
+
+          <div className="sheet-publish">
+            <span>{publishedLabel}</span>
+            {safari.updatedAt ? <span>Updated {new Date(safari.updatedAt).toLocaleDateString(undefined, { day: "2-digit", month: "long", year: "numeric" })}</span> : null}
+          </div>
+
+          <div className="sheet-cta">
+            <MagneticButton className="button button--sand" onClick={() => onBook(safari)}>Book this safari <ArrowRight size={17} /></MagneticButton>
+            {safari.slug ? <button className="text-link" onClick={() => openSafariPage(safari)}>Open full safari page <ArrowRight size={16} /></button> : null}
+          </div>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
+function DestinationDetailPage({ slug, onBack, openSafariPage }: { slug: string; onBack: () => void; openSafariPage: (safari: Safari) => void }) {
   const destinations = useDestinations();
   const safaris = usePublishedSafaris();
   const destination = destinations.find((item) => (item.slug || item.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")) === slug);
@@ -800,7 +998,7 @@ function DestinationDetailPage({ slug, onBack, openSafari }: { slug: string; onB
             <p>{destination.description}</p>
             {destination.activities && destination.activities.length > 0 ? <ul className="detail-list">{destination.activities.map((item) => <li key={item}><Check size={15} />{item}</li>)}</ul> : null}
           </article>
-          {relatedSafaris.length > 0 ? <article className="detail-card" data-reveal><p className="eyebrow">RELATED SAFARIS</p><h2>Journeys that include {destination.name}</h2><div className="detail-related-list">{relatedSafaris.map((safari) => <button key={safari.slug || safari.id} className="detail-related-item" onClick={() => openSafari(safari)}><span>{safari.duration}</span><strong>{safari.title}</strong><ArrowRight size={16} /></button>)}</div></article> : null}
+          {relatedSafaris.length > 0 ? <article className="detail-card" data-reveal><p className="eyebrow">RELATED SAFARIS</p><h2>Journeys that include {destination.name}</h2><div className="detail-related-list">{relatedSafaris.map((safari) => <button key={safari.slug || safari.id} className="detail-related-item" onClick={() => openSafariPage(safari)}><span>{safari.duration}</span><strong>{safari.title}</strong><ArrowRight size={16} /></button>)}</div></article> : null}
         </div>
         {destination.gallery && destination.gallery.length > 0 ? <div className="detail-gallery" data-reveal>{destination.gallery.map((image, index) => <img key={`${image}-${index}`} src={image} alt={`${destination.name} gallery ${index + 1}`} loading="lazy" />)}</div> : null}
       </section>
@@ -1347,12 +1545,14 @@ function PublicApp() {
     try { return !sessionStorage.getItem("olkinyei-intro"); } catch { return true; }
   });
   const [bookingSafari, setBookingSafari] = useState<Safari | null>(null);
+  const [selectedSafariId, setSelectedSafariId] = useState<string | null>(null);
   const [bookings, setBookings] = useState<Booking[]>(() => (hasCloudBackend ? [] : readStorage("olkinyei-bookings", [])));
   const publicPages = useCmsStore((state) => state.publicPages);
   const cmsHomePage = useMemo(() => findCmsPage(publicPages, "home"), [publicPages]);
   const cmsSettings = useCmsStore((state) => state.publicSiteSettings);
   const liveSafaris = usePublishedSafaris();
   const liveDestinations = useDestinations();
+  const selectedSafari = useMemo(() => selectedSafariId ? liveSafaris.find((item) => (item.slug || item.id) === selectedSafariId) ?? null : null, [selectedSafariId, liveSafaris]);
   const activeSafari = useMemo(() => safariSlug ? liveSafaris.find((item) => (item.slug || item.id) === safariSlug) ?? null : null, [liveSafaris, safariSlug]);
   const activeDestination = useMemo(() => destinationSlug ? liveDestinations.find((item) => (item.slug || item.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")) === destinationSlug) ?? null : null, [destinationSlug, liveDestinations]);
   const publicContent: EditableContent = {
@@ -1382,10 +1582,18 @@ function PublicApp() {
 
   const openSafari = useCallback((safari: Safari) => {
     const slug = safari.slug || safari.id;
+    setSelectedSafariId(slug);
+  }, []);
+
+  const closeSafari = useCallback(() => setSelectedSafariId(null), []);
+
+  const openSafariPage = useCallback((safari: Safari) => {
+    setSelectedSafariId(null);
+    const slug = safari.slug || safari.id;
     pushRoute(safariPath(slug), { page: "experiences", safariSlug: slug, destinationSlug: null, postSlug: null });
   }, [pushRoute]);
 
-  const closeSafari = useCallback(() => {
+  const closeSafariPage = useCallback(() => {
     pushRoute(ROUTES.experiences, { page: "experiences", safariSlug: null, destinationSlug: null, postSlug: null });
   }, [pushRoute]);
 
@@ -1399,6 +1607,7 @@ function PublicApp() {
   }, [pushRoute]);
 
   const bookSafari = useCallback((safari: Safari) => {
+    setSelectedSafariId(null);
     setBookingSafari(safari);
     pushRoute(ROUTES.contact, { page: "contact", safariSlug: null, destinationSlug: null, postSlug: null });
   }, [pushRoute]);
@@ -1406,7 +1615,10 @@ function PublicApp() {
   const completeLoader = useCallback(() => { try { sessionStorage.setItem("olkinyei-intro", "true"); } catch { /* Browsing can continue when storage is blocked. */ } setLoading(false); }, []);
 
   useEffect(() => {
-    const pop = () => setRoute(routeStateFromPath(window.location.pathname));
+    const pop = () => {
+      setSelectedSafariId(null);
+      setRoute(routeStateFromPath(window.location.pathname));
+    };
     window.addEventListener("popstate", pop);
     return () => window.removeEventListener("popstate", pop);
   }, []);
@@ -1493,9 +1705,9 @@ function PublicApp() {
   const pageContent = useMemo(() => {
     if (page === "home") return <HomePage navigate={navigate} content={publicContent} openSafari={openSafari} onOpenPost={openPost} />;
     if (page === "about") return <AboutPage navigate={navigate} />;
-    if (page === "experiences" && safariSlug) return <SafariDetailPage slug={safariSlug} onBack={closeSafari} onBook={bookSafari} openDestination={openDestination} openSafari={openSafari} />;
+    if (page === "experiences" && safariSlug) return <SafariDetailPage slug={safariSlug} onBack={closeSafariPage} onBook={bookSafari} openDestination={openDestination} openSafariPage={openSafariPage} />;
     if (page === "experiences") return <ExperiencesPage openSafari={openSafari} onBook={bookSafari} />;
-    if (page === "destinations" && destinationSlug) return <DestinationDetailPage slug={destinationSlug} onBack={closeDestination} openSafari={openSafari} />;
+    if (page === "destinations" && destinationSlug) return <DestinationDetailPage slug={destinationSlug} onBack={closeDestination} openSafariPage={openSafariPage} />;
     if (page === "destinations") return <DestinationsPage onBook={bookSafari} openDestination={openDestination} />;
     if (page === "journal") {
       return postSlug
@@ -1503,7 +1715,7 @@ function PublicApp() {
         : <JournalPage onOpenPost={openPost} />;
     }
     return <ContactPage initialSafari={bookingSafari} bookings={bookings} content={publicContent} onStored={(booking) => setBookings((current) => current.some((item) => item.reference === booking.reference) ? current : [booking, ...current])} />;
-  }, [page, safariSlug, destinationSlug, postSlug, navigate, publicContent.homeStatement, publicContent.conservationStatement, publicContent.contactEmail, openSafari, openDestination, openPost, closePost, closeSafari, closeDestination, bookSafari, bookingSafari, bookings]);
+  }, [page, safariSlug, destinationSlug, postSlug, navigate, publicContent.homeStatement, publicContent.conservationStatement, publicContent.contactEmail, openSafari, openSafariPage, openDestination, openPost, closePost, closeSafariPage, closeDestination, bookSafari, bookingSafari, bookings]);
 
   const mainKey = safariSlug
     ? `safari-${safariSlug}`
@@ -1513,7 +1725,7 @@ function PublicApp() {
         ? `journal-${postSlug}`
         : page;
 
-  return <div className="app-shell"><a className="skip-link" href="#main-content">Skip to content</a><CustomCursor /><AnimatePresence>{loading && <Loader onComplete={completeLoader} />}</AnimatePresence>{!loading && <Header page={page} navigate={navigate} />}<AnimatePresence mode="wait">{!loading && <motion.main id="main-content" key={mainKey} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.45 }}>{pageContent}<Footer navigate={navigate} /></motion.main>}</AnimatePresence></div>;
+  return <div className="app-shell"><a className="skip-link" href="#main-content">Skip to content</a><CustomCursor /><AnimatePresence>{loading && <Loader onComplete={completeLoader} />}</AnimatePresence>{!loading && <Header page={page} navigate={navigate} />}<AnimatePresence mode="wait">{!loading && <motion.main id="main-content" key={mainKey} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.45 }}>{pageContent}<Footer navigate={navigate} /></motion.main>}</AnimatePresence><AnimatePresence>{selectedSafari && <SafariDetailsSheet safari={selectedSafari} onClose={closeSafari} onBook={bookSafari} openSafariPage={openSafariPage} />}</AnimatePresence></div>;
 }
 
 function isAdminRoute() {

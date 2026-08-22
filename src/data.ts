@@ -6,6 +6,7 @@ export type Safari = {
   duration: string;
   nights: number;
   price: number;
+  discount?: number;
   image: string;
   gallery: string[];
   summary: string;
@@ -20,7 +21,12 @@ export type Safari = {
   parks?: string[];
   wildlife?: string[];
   tags?: string[];
+  difficulty?: "Gentle" | "Moderate" | "Active" | "Expedition";
   featured?: boolean;
+  published?: boolean;
+  publishDate?: string;
+  createdAt?: string;
+  updatedAt?: string;
   seo?: { title: string; description: string };
 };
 
