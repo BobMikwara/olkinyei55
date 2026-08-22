@@ -26,7 +26,6 @@ import {
   Compass,
   Download,
   ExternalLink,
-  Eye,
   Filter,
   Headphones,
   Menu,
@@ -370,7 +369,7 @@ function PageHero({ eyebrow, title, text, image, align = "left", page, children 
 }) {
   const cmsPage = usePublishedCmsPage(page);
   return (
-    <section className={`page-hero page-hero--${align}`}>
+    <section className={`page-hero page-hero--${align} page-hero--${page}`}>
       <img src={cmsPage?.heroImage || image} alt="" className="page-hero-image" fetchPriority="high" />
       <div className="page-hero-wash" />
       <div className="page-hero-copy"><p className="eyebrow">{cmsPage?.heroEyebrow || eyebrow}</p><h1 className="split-reveal">{cmsPage?.heroTitle || title}</h1><p>{cmsPage?.heroText || text}</p>{children}</div>
@@ -597,10 +596,9 @@ function usePublicGuides() {
 }
 
 /**
- * Gallery images for the Field Notes archive. Reads published media assets
- * from the shared store (Supabase public.media_assets). Supabase is the single
- * source of truth; the bundled seed is ONLY the demo-mode fallback when no
- * cloud backend is configured.
+ * Public media used by the social/photo dispatch strip. The editorial Archive
+ * itself is deliberately driven by published blog posts below, so media
+ * library assets and safari packages can never leak into the journal archive.
  */
 function useGalleryItems() {
   const cmsMedia = useCmsStore((state) => state.publicMedia);
@@ -1085,15 +1083,16 @@ function formatPostDate(value?: string) {
   return Number.isNaN(date.getTime()) ? "" : date.toLocaleDateString(undefined, { day: "2-digit", month: "long", year: "numeric" });
 }
 
-function JournalPage({ onOpenPost }: { onOpenPost: (slug: string) => void }) {
+function JournalPage({ onOpenPost, onOpenSafari }: { onOpenPost: (slug: string) => void; onOpenSafari: (safari: Safari) => void }) {
   const posts = usePublishedPosts();
+  const journeys = usePublishedSafaris();
   const [category, setCategory] = useState("All");
   const categories = useMemo(() => ["All", ...Array.from(new Set(posts.map((post) => post.category)))], [posts]);
   const visible = posts.filter((post) => category === "All" || post.category === category);
   const [lead, ...rest] = visible;
 
   return (
-    <>
+    <div className="field-notes-page">
       <PageHero page="journal" eyebrow="FIELD NOTES & JOURNAL" title="Notes carried back from the bush." text="Field dispatches, photography, wildlife observations and practical guidance from the people who guide these landscapes." image={imagery.cheetah} />
 
       <section className="journal-page section-pad">
@@ -1134,9 +1133,9 @@ function JournalPage({ onOpenPost }: { onOpenPost: (slug: string) => void }) {
             )}
 
             {rest.length > 0 && (
-              <div className="journal-list">
-                {rest.map((post) => (
-                  <article key={post.id} className="journal-card" data-reveal>
+              <div className="journal-list field-note-list">
+                {rest.map((post, index) => (
+                  <article key={post.id} className={`journal-card field-note-card field-note-card--${(index % 4) + 1}`} data-reveal>
                     <button className="journal-card-image" onClick={() => onOpenPost(post.slug)} aria-label={`Read ${post.title}`}>
                       <img src={post.heroImage} alt="" loading="lazy" />
                     </button>
@@ -1157,9 +1156,39 @@ function JournalPage({ onOpenPost }: { onOpenPost: (slug: string) => void }) {
         )}
       </section>
 
+      {journeys.length > 0 && <JournalJourneysSection journeys={journeys} onOpenSafari={onOpenSafari} />}
+
       {/* Field Notes content, merged in below the written journal. */}
-      <FieldNotesSections />
-    </>
+      <FieldNotesSections onOpenPost={onOpenPost} />
+    </div>
+  );
+}
+
+function JournalJourneysSection({ journeys, onOpenSafari }: { journeys: Safari[]; onOpenSafari: (safari: Safari) => void }) {
+  return (
+    <section className="journeys-editorial section-pad">
+      <div className="journeys-editorial-intro">
+        <SectionHeading number="02" eyebrow="SIGNATURE JOURNEYS" title="Made for how you want to feel." text="Each route is a beginning. Your naturalist and journey designer shape the final expedition around season, pace and curiosity." />
+        <span className="journeys-editorial-count">{String(journeys.length).padStart(2, "0")} ways to go</span>
+      </div>
+      <div className="journeys-editorial-grid">
+        {journeys.map((safari, index) => (
+          <article className={`journey-editorial-card journey-editorial-card--${index === 0 ? "featured" : index % 2 === 1 ? "tall" : "wide"}`} key={safari.id} data-reveal>
+            <button className="journey-editorial-image" onClick={() => onOpenSafari(safari)} aria-label={`Open ${safari.title}`}>
+              {safari.image && <img src={safari.image} alt={`${safari.title} in ${safari.region}`} loading="lazy" />}
+              <span>Explore journey <ArrowRight size={15} /></span>
+            </button>
+            <div className="journey-editorial-copy">
+              <div className="journey-editorial-meta"><span>{String(index + 1).padStart(2, "0")}</span><span>{safari.region}</span></div>
+              <h3>{safari.title}</h3>
+              <p>{safari.summary}</p>
+              <div className="journey-editorial-facts"><span>{safari.duration}</span><span>From {safari.price > 0 ? formatCurrency(safari.price) : "on request"}</span></div>
+              <button className="text-link" onClick={() => onOpenSafari(safari)}>View the journey <ArrowRight size={15} /></button>
+            </div>
+          </article>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -1404,7 +1433,7 @@ function TestimonialsSection() {
 
   return (
     <section className="testimonials section-pad" id="testimonials">
-      <SectionHeading number="03" eyebrow="GUEST JOURNALS" title="Stories that travelled home." />
+      <SectionHeading number="04" eyebrow="GUEST JOURNALS" title="Stories that travelled home." />
 
       {ordered.length === 0 ? (
         <div className="testimonial-empty" data-reveal>
@@ -1460,36 +1489,55 @@ function TestimonialsSection() {
 }
 
 /**
- * The former Field Notes page, now rendered as part of the combined
- * Field Notes & Journal destination. Content and markup are unchanged except
- * that testimonials are read live from the CMS.
+ * Field Notes content rendered as part of the combined Field Notes & Journal
+ * destination. The Archive is intentionally sourced from published editorial
+ * posts only; safari packages stay in the separate Journeys section.
  */
-function FieldNotesSections() {
+function FieldNotesSections({ onOpenPost }: { onOpenPost: (slug: string) => void }) {
   const gallery = useGalleryItems();
+  const archivePosts = usePublishedPosts();
   const [filter, setFilter] = useState("All");
-  const [lightbox, setLightbox] = useState<number | null>(null);
-  const filters = ["All", "Wildlife", "Migration", "Lodges", "People", "Landscape"];
-  const visible = gallery.filter((item) => filter === "All" || item.type === filter);
-  const showNext = (direction: number) => setLightbox((current) => current === null ? null : (current + direction + visible.length) % visible.length);
-
-  useEffect(() => {
-    if (lightbox === null) return;
-    const handleKey = (event: globalThis.KeyboardEvent) => {
-      if (event.key === "Escape") setLightbox(null);
-      if (event.key === "ArrowRight") showNext(1);
-      if (event.key === "ArrowLeft") showNext(-1);
-    };
-    window.addEventListener("keydown", handleKey);
-    return () => window.removeEventListener("keydown", handleKey);
-  });
+  const filters = useMemo(() => ["All", ...Array.from(new Set(archivePosts.map((post) => post.category)))], [archivePosts]);
+  const visible = archivePosts.filter((post) => filter === "All" || post.category === filter);
+  const archiveSize = (index: number) => {
+    const rhythm = ["wide", "tall", "standard", "wide", "standard", "standard", "standard"] as const;
+    return rhythm[index % rhythm.length];
+  };
 
   return (
     <>
-      <section className="gallery-section section-pad"><div className="gallery-header"><SectionHeading number="02" eyebrow="THE ARCHIVE" title="Light, dust, life." /><div className="gallery-filters">{filters.map((item) => <button className={filter === item ? "active" : ""} key={item} onClick={() => setFilter(item)}>{item}</button>)}</div></div><motion.div className="masonry" layout>{visible.map((item, index) => <motion.button layout className={`masonry-item masonry-item--${item.size}`} key={item.src} onClick={() => setLightbox(index)} initial={{ opacity: 0 }} animate={{ opacity: 1 }}><img src={item.src} alt={item.alt} loading="lazy" /><span><small>{item.type}</small><Eye />View</span></motion.button>)}</motion.div></section>
+      <section className="gallery-section field-notes-archive section-pad">
+        <div className="gallery-header">
+          <SectionHeading number="03" eyebrow="THE ARCHIVE" title="Light, dust, life." />
+          {archivePosts.length > 0 && <div className="gallery-filters">{filters.map((item) => <button className={filter === item ? "active" : ""} key={item} onClick={() => setFilter(item)}>{item}</button>)}</div>}
+        </div>
+        {archivePosts.length > 0 ? (
+          <motion.div className="masonry" layout>
+            {visible.map((post, index) => {
+              const size = archiveSize(index);
+              return (
+                <motion.button layout className={`masonry-item archive-item archive-item--${size}`} key={post.id} onClick={() => onOpenPost(post.slug)} aria-label={`Read ${post.title}`} initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+                  <img src={post.heroImage} alt={post.title} loading="lazy" />
+                  <span className="archive-item-overlay">
+                    <span className="archive-item-meta">{post.category} / {formatPostDate(post.publishedAt)}</span>
+                    <strong className="archive-item-title">{post.title}</strong>
+                    <span className="archive-item-read">Read field note <ArrowRight size={15} /></span>
+                  </span>
+                </motion.button>
+              );
+            })}
+          </motion.div>
+        ) : (
+          <div className="journal-empty archive-empty" data-reveal>
+            <p className="eyebrow">THE ARCHIVE</p>
+            <h3>New field notes are being written.</h3>
+            <p>Published editorial stories appear here as they are added to the CMS.</p>
+          </div>
+        )}
+      </section>
       <section className="drone-film"><video controls playsInline preload="none" poster={imagery.heroPoster}><source src={imagery.heroVideo} type="video/mp4" /></video><div><p className="eyebrow">FROM ABOVE / 01:12</p><h2>The migration draws its own map.</h2><p>Film by our Serengeti field team.</p></div></section>
       <TestimonialsSection />
       <section className="instagram-strip section-pad"><p className="eyebrow">@OLKINYEIEXPEDITIONS</p><h2>Dispatches from the field.</h2><a href="https://www.instagram.com" target="_blank" rel="noreferrer">Follow on Instagram <ExternalLink size={15} /></a><div>{gallery.slice(2, 7).map((item) => <a key={item.src} href="https://www.instagram.com" target="_blank" rel="noreferrer" aria-label="View field dispatch on Instagram"><img src={item.src} alt="" loading="lazy" /></a>)}</div></section>
-      <AnimatePresence>{lightbox !== null && <motion.div className="lightbox" role="dialog" aria-modal="true" aria-label="Gallery lightbox" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}><button className="lightbox-close" onClick={() => setLightbox(null)} aria-label="Close lightbox"><X /></button><button className="lightbox-prev" onClick={() => showNext(-1)} aria-label="Previous image"><ArrowLeft /></button><motion.img key={visible[lightbox].src} src={visible[lightbox].src} alt={visible[lightbox].alt} initial={{ opacity: 0.4, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} /><button className="lightbox-next" onClick={() => showNext(1)} aria-label="Next image"><ArrowRight /></button><p>{String(lightbox + 1).padStart(2, "0")} / {String(visible.length).padStart(2, "0")} &nbsp; {visible[lightbox].alt}</p></motion.div>}</AnimatePresence>
     </>
   );
 }
@@ -1757,7 +1805,7 @@ function PublicApp() {
     if (page === "journal") {
       return postSlug
         ? <JournalPostPage slug={postSlug} onBack={closePost} onOpenPost={openPost} navigate={navigate} />
-        : <JournalPage onOpenPost={openPost} />;
+        : <JournalPage onOpenPost={openPost} onOpenSafari={openSafari} />;
     }
     return <ContactPage initialSafari={bookingSafari} bookings={bookings} content={publicContent} onStored={(booking) => setBookings((current) => current.some((item) => item.reference === booking.reference) ? current : [booking, ...current])} />;
   }, [page, safariSlug, destinationSlug, postSlug, navigate, publicContent.homeStatement, publicContent.conservationStatement, publicContent.contactEmail, openSafari, openDestination, openPost, closePost, closeSafari, closeDestination, bookSafari, bookingSafari, bookings]);
