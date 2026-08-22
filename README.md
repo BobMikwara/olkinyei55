@@ -33,6 +33,12 @@ Without Supabase credentials, the site enters a clearly labelled demonstration m
    `testimonials_moderation.sql`, `testimonials_sources.sql`, and
    `cms_global_sync.sql` (adds destinations/guides/vehicles/customers/media
    columns, the `media_assets` table, RLS, Realtime, and seed data).
+4. Run `supabase/public_read_restore.sql` last. It (re)creates the anonymous
+   SELECT policies and grants that let the public website read published
+   packages, destinations, guides, media, blog posts, and testimonials. It
+   never deletes, updates, truncates or reseeds any row — it is safe to re-run.
+   If the public site shows empty safaris/destinations while the CMS still
+   shows them, this is almost always because this read path was missing.
 4. Create the first staff user in Authentication.
 5. Add a matching row to `public.profiles` with the user's auth UUID and role `admin`.
 6. Enable Realtime for `public.bookings` if the final statement in the schema is skipped by an existing publication.

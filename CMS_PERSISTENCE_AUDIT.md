@@ -205,3 +205,44 @@ Same issue in `src/admin/store.ts`: the `loadCloud*` loaders for `packages`, `de
 
 **Result:** `hasCloudBackend ? Supabase : demo` is now enforced at every layer — initial state, persistence, loaders, hooks, and HTTP cache — with no silent `|| demoData` or `length ? data : fallback` paths surviving in cloud mode.
 
+---
+
+## 9. 2026-08-22 Hardening — reconnect public reads to existing CMS records
+
+**Problem found on the third audit:** when the anonymous Supabase read returns an
+empty result (or errors), the site renders an *empty* public page while the CMS
+still lists every record. That reads as "safaris/destinations disappeared",
+when in fact the CMS rows are intact and the *read path* is what broke. The
+prior hardening removed the demo-fallback that used to mask it, so the empty
+state is now honest — but the underlying cause (a missing / over-restrictive
+anonymous read) must be fixed, not masked again.
+
+**Changes (no CMS data is modified; nothing is deleted or reseeded):**
+
+* `src/admin/store.ts` public loaders now apply the explicit publish filter
+  (`packages` → `published=true`, `destinations` → `published=true`,
+  `guides` → `active=true`/`archived=false`, `media_assets` →
+  `published=true`/`archived=false`) instead of relying solely on RLS, and log
+  `TABLE`, `QUERY`, `FILTER`, `RECORD COUNT`, and the error when a read fails.
+  Empty-result is never conflated with "broken query".
+* A self-healing retry re-runs every public loader when the tab regains focus,
+  so a transient network blip or a freshly-applied RLS policy cannot strand the
+  site on an empty page until a manual refresh.
+* `src/lib/cms.ts` — the central data-access layer — is now a correct, complete
+  public-read/write layer (explicit filters, single-source tables, throws on
+  error, same diagnostics) that cleanly separates CMS writes (authenticated)
+  from public reads (anonymous).
+* `supabase/public_read_restore.sql` (NEW) — idempotent migration that creates
+  the anonymous SELECT policies + grants for `packages`, `destinations`,
+  `guides`, `media_assets`, `blog_posts`, `testimonials`, and `cms_content`.
+  It only touches read policies; it never deletes/updates/truncates/seeds rows,
+  and it is safe to re-run. Run it after `cms_global_sync.sql` (see README).
+* `vercel.json` already serves `index.html` with `no-store`, so a CMS change is
+  fetched fresh on every navigation (this is a Vite SPA, not Next.js — there is
+  no SSG/ISR cache to invalidate).
+
+**Verification after applying `public_read_restore.sql`:** the anon read in the
+store log (`[PUBLIC SAFARIS]`) shows a non-zero record count that matches the
+CMS; `/safaris`, `/safaris/<slug>`, `/destinations`, and
+`/destinations/<slug>` all render the existing records.
+

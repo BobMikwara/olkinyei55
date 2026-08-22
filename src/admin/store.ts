@@ -588,7 +588,12 @@ type CmsContentRow = { id: string; content: unknown };
 function shouldLogPublicDiagnostics() {
   if (typeof window === "undefined") return import.meta.env.DEV;
   const host = window.location.hostname.toLowerCase();
-  return import.meta.env.DEV || host === "localhost" || host === "127.0.0.1" || host.endsWith(".vercel.app");
+  return import.meta.env.DEV
+    || host === "localhost"
+    || host === "127.0.0.1"
+    || host.endsWith(".vercel.app")
+    || host.endsWith(".e2b.app")
+    || host.includes("preview");
 }
 
 function logPublicReadDiagnostics(label: string, details: Record<string, unknown>) {
@@ -814,20 +819,32 @@ async function loadPublicBlogPosts(options: { force?: boolean; requireSuccess?: 
   const client = supabasePublic;
   if (!client || (publicBlogBootstrapped && !options.force)) return;
   publicBlogBootstrapped = true;
+  const table = TABLES.blogPosts;
+  const filter = "published_at is not null (published posts via RLS)";
   try {
     const { data, error } = await client
-      .from(TABLES.blogPosts)
+      .from(table)
       .select("*")
       .order("published_at", { ascending: false, nullsFirst: false });
     if (error) throw new Error(`${error.message}${error.hint ? ` — ${error.hint}` : ""}`);
-    state = { ...state, publicBlogPosts: (data as DbBlogRow[] | null)?.map(blogPostFromRow) ?? [] };
+    const rows = (data as DbBlogRow[] | null) ?? [];
+    state = { ...state, publicBlogPosts: rows.map(blogPostFromRow) };
     emit();
+    logPublicReadDiagnostics("BLOG", {
+      table,
+      query: "select * order by published_at desc nulls last",
+      filter,
+      recordCount: rows.length,
+      sample: rows.slice(0, 3).map((row) => ({ id: row.id, slug: row.slug, title: row.title, published_at: row.published_at, archived: row.archived })),
+    });
   } catch (error) {
     publicBlogBootstrapped = false;
+    logPublicReadError("BLOG", error, {
+      table,
+      filter,
+      hint: "Run supabase/blog_posts_sync.sql, then confirm anon SELECT is permitted on public.blog_posts.",
+    });
     if (options.requireSuccess) throw error;
-    if (import.meta.env.DEV) {
-      console.warn("[Olkinyei] Could not load public blog posts:", error instanceof Error ? error.message : error);
-    }
   }
 }
 
@@ -1038,6 +1055,46 @@ if (typeof window !== "undefined") {
   }
 }
 
+// ============ Self-healing public reads ============
+// A public CMS read can fail on first load (transient network blip, a freshly
+// applied RLS policy whose schema cache is stale, or an environment variable
+// that was added after the Vercel build). Without a retry the site would stay
+// stuck on an empty page until a manual refresh or a Realtime event. Re-run the
+// public loaders when the tab regains focus so the existing Supabase records
+// are reconnected without a full reload and without ever touching the data.
+let publicReadRetryScheduled = false;
+
+function retryPublicReads() {
+  if (publicReadRetryScheduled || typeof window === "undefined") return;
+  publicReadRetryScheduled = true;
+  window.setTimeout(() => {
+    publicReadRetryScheduled = false;
+    if (!hasCloudBackend) return;
+    publicCmsContentBootstrapped = false;
+    publicPackagesBootstrapped = false;
+    publicDestinationsBootstrapped = false;
+    publicGuidesBootstrapped = false;
+    publicMediaBootstrapped = false;
+    publicBlogBootstrapped = false;
+    publicTestimonialsBootstrapped = false;
+    void loadPublicCmsContent();
+    void loadPublicBlogPosts();
+    void loadPublicTestimonials();
+    void loadPublicPackages();
+    void loadPublicDestinations();
+    void loadPublicGuides();
+    void loadPublicMedia();
+  }, 4000);
+}
+
+if (typeof window !== "undefined" && hasCloudBackend) {
+  window.addEventListener("focus", retryPublicReads);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") retryPublicReads();
+  });
+  void retryPublicReads();
+}
+
 export function newBlogId(): string {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") return crypto.randomUUID();
   // Fallback for very old browsers: RFC-4122 v4 shape.
@@ -1240,26 +1297,36 @@ async function loadPublicPackages(options: { force?: boolean; requireSuccess?: b
   const client = supabasePublic;
   if (!client || (publicPackagesBootstrapped && !options.force)) return;
   publicPackagesBootstrapped = true;
+  const table = "packages";
+  // The anonymous visitor only ever sees published, non-archived packages.
+  // We filter explicitly here (not just via RLS) so a permissive or stale RLS
+  // policy can never leak drafts to the site, and so a broken read is obvious.
+  const filter = "published = true";
   try {
     let orderColumn = "created_at";
-    let { data, error } = await client.from("packages").select("*").order(orderColumn, { ascending: false });
+    let { data, error } = await client.from(table).select("*").eq("published", true).order(orderColumn, { ascending: false });
     if (error && isMissingColumnError(error.message)) {
       orderColumn = "updated_at";
-      ({ data, error } = await client.from("packages").select("*").order(orderColumn, { ascending: false }));
+      ({ data, error } = await client.from(table).select("*").eq("published", true).order(orderColumn, { ascending: false }));
     }
     if (error) throw new Error(error.message);
     const rows = (data as DbPackageRow[] | null) ?? [];
     state = { ...state, publicPackages: rows.map(packageFromRow) };
     emit();
     logPublicReadDiagnostics("SAFARIS", {
-      table: "packages",
-      query: `select * order by ${orderColumn} desc`,
+      table,
+      query: `select * where ${filter} order by ${orderColumn} desc`,
+      filter,
       recordCount: rows.length,
       sample: rows.slice(0, 3).map((row) => ({ id: row.id, slug: row.slug, title: row.title, published: row.published, archived: row.archived })),
     });
   } catch (error) {
     publicPackagesBootstrapped = false;
-    logPublicReadError("SAFARIS", error, { table: "packages", filter: "anon published content via RLS" });
+    logPublicReadError("SAFARIS", error, {
+      table,
+      filter,
+      hint: "Run supabase/packages_sync.sql, then confirm anon SELECT is permitted on public.packages (a SELECT policy for anon + GRANT SELECT).",
+    });
     if (options.requireSuccess) throw error;
   }
 }
@@ -1469,18 +1536,36 @@ async function loadPublicTestimonials(options: { force?: boolean; requireSuccess
   const client = supabasePublic;
   if (!client || (publicTestimonialsBootstrapped && !options.force)) return;
   publicTestimonialsBootstrapped = true;
+  const table = TABLES.testimonials;
+  const filter = "status = 'approved' (approved reviews via RLS)";
   try {
-    const { data, error } = await client
-      .from(TABLES.testimonials)
+    let { data, error } = await client
+      .from(table)
       .select("*")
       .order("created_at", { ascending: false });
+    if (error && isMissingColumnError(error.message)) {
+      // Base schema.sql table has no created_at; sort by the stable column it does have.
+      ({ data, error } = await client.from(table).select("*").order("sort_order", { ascending: true }));
+    }
     if (error) throw new Error(error.message);
-    state = { ...state, publicTestimonials: (data as DbTestimonialRow[] | null)?.map(testimonialFromRow) ?? [] };
+    const rows = (data as DbTestimonialRow[] | null) ?? [];
+    state = { ...state, publicTestimonials: rows.map(testimonialFromRow) };
     emit();
+    logPublicReadDiagnostics("TESTIMONIALS", {
+      table,
+      query: "select * order by created_at desc",
+      filter,
+      recordCount: rows.length,
+      sample: rows.slice(0, 3).map((row) => ({ id: row.id, guest_name: row.guest_name, status: row.status, source: row.source })),
+    });
   } catch (error) {
     publicTestimonialsBootstrapped = false;
+    logPublicReadError("TESTIMONIALS", error, {
+      table,
+      filter,
+      hint: "Run supabase/testimonials_moderation.sql and testimonials_sources.sql, then confirm anon SELECT is permitted on public.testimonials.",
+    });
     if (options.requireSuccess) throw error;
-    if (import.meta.env.DEV) console.warn("[Olkinyei] Could not load public testimonials:", error);
   }
 }
 
@@ -1909,15 +1994,29 @@ async function loadPublicDestinations(options: { force?: boolean; requireSuccess
   const client = supabasePublic;
   if (!client || (publicDestinationsBootstrapped && !options.force)) return;
   publicDestinationsBootstrapped = true;
+  const table = "destinations";
+  const filter = "published = true";
   try {
-    const { data, error } = await client.from("destinations").select("*").order("name", { ascending: true });
+    const { data, error } = await client.from(table).select("*").eq("published", true).order("name", { ascending: true });
     if (error) throw new Error(error.message);
-    state = { ...state, publicDestinations: (data as DbDestinationRow[] | null)?.map(destinationFromRow) ?? [] };
+    const rows = (data as DbDestinationRow[] | null) ?? [];
+    state = { ...state, publicDestinations: rows.map(destinationFromRow) };
     emit();
+    logPublicReadDiagnostics("DESTINATIONS", {
+      table,
+      query: `select * where ${filter} order by name asc`,
+      filter,
+      recordCount: rows.length,
+      sample: rows.slice(0, 3).map((row) => ({ id: row.id, slug: row.slug, name: row.name, country: row.country, published: row.published })),
+    });
   } catch (error) {
     publicDestinationsBootstrapped = false;
+    logPublicReadError("DESTINATIONS", error, {
+      table,
+      filter,
+      hint: "Run supabase/cms_global_sync.sql, then confirm anon SELECT is permitted on public.destinations (a SELECT policy for anon + GRANT SELECT).",
+    });
     if (options.requireSuccess) throw error;
-    if (import.meta.env.DEV) console.warn("[Olkinyei] Could not load public destinations:", error instanceof Error ? error.message : error);
   }
 }
 
@@ -2019,15 +2118,34 @@ async function loadPublicGuides(options: { force?: boolean; requireSuccess?: boo
   const client = supabasePublic;
   if (!client || (publicGuidesBootstrapped && !options.force)) return;
   publicGuidesBootstrapped = true;
+  const table = "guides";
+  const filter = "active = true and archived = false";
   try {
-    const { data, error } = await client.from("guides").select("*").order("name", { ascending: true });
+    let { data, error } = await client.from(table).select("*").eq("active", true).eq("archived", false).order("name", { ascending: true });
+    if (error && isMissingColumnError(error.message)) {
+      // Older schema may not have `archived`; fall back to active-only (RLS
+      // still restricts anon to active, non-archived guides).
+      ({ data, error } = await client.from(table).select("*").eq("active", true).order("name", { ascending: true }));
+    }
     if (error) throw new Error(error.message);
-    state = { ...state, publicGuides: (data as DbGuideRow[] | null)?.map(guideFromRow) ?? [] };
+    const rows = (data as DbGuideRow[] | null) ?? [];
+    state = { ...state, publicGuides: rows.map(guideFromRow) };
     emit();
+    logPublicReadDiagnostics("GUIDES", {
+      table,
+      query: `select * where ${filter} order by name asc`,
+      filter,
+      recordCount: rows.length,
+      sample: rows.slice(0, 3).map((row) => ({ id: row.id, slug: row.slug, name: row.name, active: row.active, archived: row.archived })),
+    });
   } catch (error) {
     publicGuidesBootstrapped = false;
+    logPublicReadError("GUIDES", error, {
+      table,
+      filter,
+      hint: "Run supabase/cms_global_sync.sql, then confirm anon SELECT is permitted on public.guides.",
+    });
     if (options.requireSuccess) throw error;
-    if (import.meta.env.DEV) console.warn("[Olkinyei] Could not load public guides:", error instanceof Error ? error.message : error);
   }
 }
 
@@ -2208,15 +2326,29 @@ async function loadPublicMedia(options: { force?: boolean; requireSuccess?: bool
   const client = supabasePublic;
   if (!client || (publicMediaBootstrapped && !options.force)) return;
   publicMediaBootstrapped = true;
+  const table = "media_assets";
+  const filter = "archived = false and published = true";
   try {
-    const { data, error } = await client.from("media_assets").select("*").order("created_at", { ascending: false });
+    const { data, error } = await client.from(table).select("*").eq("archived", false).eq("published", true).order("created_at", { ascending: false });
     if (error) throw new Error(error.message);
-    state = { ...state, publicMedia: (data as DbMediaRow[] | null)?.map(mediaFromRow) ?? [] };
+    const rows = (data as DbMediaRow[] | null) ?? [];
+    state = { ...state, publicMedia: rows.map(mediaFromRow) };
     emit();
+    logPublicReadDiagnostics("MEDIA", {
+      table,
+      query: `select * where ${filter} order by created_at desc`,
+      filter,
+      recordCount: rows.length,
+      sample: rows.slice(0, 3).map((row) => ({ id: row.id, url: row.url, type: row.type, published: row.published, archived: row.archived })),
+    });
   } catch (error) {
     publicMediaBootstrapped = false;
+    logPublicReadError("MEDIA", error, {
+      table,
+      filter,
+      hint: "Run supabase/cms_global_sync.sql, then confirm anon SELECT is permitted on public.media_assets.",
+    });
     if (options.requireSuccess) throw error;
-    if (import.meta.env.DEV) console.warn("[Olkinyei] Could not load public media:", error instanceof Error ? error.message : error);
   }
 }
 
