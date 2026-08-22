@@ -60,6 +60,7 @@ import {
 } from "./lib/supabase";
 import { store as cmsStore, useStore as useCmsStore } from "./admin/store";
 import { SOURCE_LABELS } from "./admin/reviewProviders";
+import SafariDetailsPanel from "./SafariDetailsPanel";
 
 gsap.registerPlugin(ScrollTrigger, SplitText, MorphSVGPlugin);
 
@@ -137,10 +138,6 @@ const emptyBooking: Omit<Booking, "reference" | "createdAt" | "status"> = {
 function normalizePath(pathname: string): string {
   if (!pathname || pathname === "/") return "/";
   return pathname.replace(/\/+$/, "") || "/";
-}
-
-function safariPath(slug: string) {
-  return `${ROUTES.experiences}/${slug}`;
 }
 
 function destinationPath(slug: string) {
@@ -1347,6 +1344,7 @@ function PublicApp() {
     try { return !sessionStorage.getItem("olkinyei-intro"); } catch { return true; }
   });
   const [bookingSafari, setBookingSafari] = useState<Safari | null>(null);
+  const [panelSafari, setPanelSafari] = useState<Safari | null>(null);
   const [bookings, setBookings] = useState<Booking[]>(() => (hasCloudBackend ? [] : readStorage("olkinyei-bookings", [])));
   const publicPages = useCmsStore((state) => state.publicPages);
   const cmsHomePage = useMemo(() => findCmsPage(publicPages, "home"), [publicPages]);
@@ -1365,6 +1363,7 @@ function PublicApp() {
     const target = normalizePath(path);
     if (normalizePath(window.location.pathname) !== target) window.history.pushState({}, "", target);
     setRoute(nextRoute ?? routeStateFromPath(target));
+    setPanelSafari(null);
     window.scrollTo({ top: 0, behavior: "instant" });
   }, []);
 
@@ -1380,11 +1379,20 @@ function PublicApp() {
     pushRoute(ROUTES.journal, { page: "journal", safariSlug: null, destinationSlug: null, postSlug: null });
   }, [pushRoute]);
 
+  // "View details" on a safari package: open the right-side editorial slide-over
+  // panel on top of the current page. The listing stays mounted behind the
+  // overlay and no route/navigation is performed — the panel is the View
+  // Details experience, never a full-page package layout.
   const openSafari = useCallback((safari: Safari) => {
-    const slug = safari.slug || safari.id;
-    pushRoute(safariPath(slug), { page: "experiences", safariSlug: slug, destinationSlug: null, postSlug: null });
-  }, [pushRoute]);
+    setPanelSafari(safari);
+  }, []);
 
+  const closeSafariPanel = useCallback(() => {
+    setPanelSafari(null);
+  }, []);
+
+  // Full-page deep-link fallback only (used by the legacy /safaris/:slug page
+  // and its back control). The in-app View Details flow never reaches this.
   const closeSafari = useCallback(() => {
     pushRoute(ROUTES.experiences, { page: "experiences", safariSlug: null, destinationSlug: null, postSlug: null });
   }, [pushRoute]);
@@ -1406,7 +1414,10 @@ function PublicApp() {
   const completeLoader = useCallback(() => { try { sessionStorage.setItem("olkinyei-intro", "true"); } catch { /* Browsing can continue when storage is blocked. */ } setLoading(false); }, []);
 
   useEffect(() => {
-    const pop = () => setRoute(routeStateFromPath(window.location.pathname));
+    const pop = () => {
+      setRoute(routeStateFromPath(window.location.pathname));
+      setPanelSafari(null);
+    };
     window.addEventListener("popstate", pop);
     return () => window.removeEventListener("popstate", pop);
   }, []);
@@ -1513,7 +1524,7 @@ function PublicApp() {
         ? `journal-${postSlug}`
         : page;
 
-  return <div className="app-shell"><a className="skip-link" href="#main-content">Skip to content</a><CustomCursor /><AnimatePresence>{loading && <Loader onComplete={completeLoader} />}</AnimatePresence>{!loading && <Header page={page} navigate={navigate} />}<AnimatePresence mode="wait">{!loading && <motion.main id="main-content" key={mainKey} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.45 }}>{pageContent}<Footer navigate={navigate} /></motion.main>}</AnimatePresence></div>;
+  return <div className="app-shell"><a className="skip-link" href="#main-content">Skip to content</a><CustomCursor /><AnimatePresence>{loading && <Loader onComplete={completeLoader} />}</AnimatePresence>{!loading && <Header page={page} navigate={navigate} />}<AnimatePresence mode="wait">{!loading && <motion.main id="main-content" key={mainKey} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.45 }}>{pageContent}<Footer navigate={navigate} /></motion.main>}</AnimatePresence><SafariDetailsPanel safari={panelSafari} onClose={closeSafariPanel} onBook={bookSafari} destinations={liveDestinations} /></div>;
 }
 
 function isAdminRoute() {
