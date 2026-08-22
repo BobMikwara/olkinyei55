@@ -2121,3 +2121,90 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
     padding-block: 4.5rem;
   }
 }
+
+/* Archive items are editorial posts, not media-library or safari-package
+   records. Each tile links to the existing journal route and carries its
+   story identity inside the image treatment. */
+.field-notes-page .field-notes-archive .archive-item {
+  isolation: isolate;
+  border: 0;
+  color: var(--ivory);
+  text-align: left;
+}
+.field-notes-page .field-notes-archive .archive-item img {
+  height: 100%;
+  object-fit: cover;
+  object-position: center 42%;
+}
+.field-notes-page .field-notes-archive .archive-item-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  gap: .55rem;
+  padding: clamp(1rem, 2vw, 1.8rem);
+  background: linear-gradient(180deg, rgba(10, 14, 10, .08), rgba(10, 14, 10, .8));
+  color: var(--ivory);
+  text-align: left;
+  transform: none;
+  opacity: 1;
+  transition: background .45s ease;
+}
+.field-notes-page .field-notes-archive .archive-item:hover .archive-item-overlay,
+.field-notes-page .field-notes-archive .archive-item:focus-visible .archive-item-overlay {
+  background: linear-gradient(180deg, rgba(10, 14, 10, .08), rgba(10, 14, 10, .88));
+}
+.field-notes-page .field-notes-archive .archive-item-meta {
+  align-self: stretch;
+  margin-top: auto;
+  color: var(--sand);
+  font-size: .52rem;
+  letter-spacing: .13em;
+  line-height: 1.5;
+  text-transform: uppercase;
+}
+.field-notes-page .field-notes-archive .archive-item-title {
+  display: block;
+  max-width: 650px;
+  font-family: var(--serif);
+  font-size: clamp(1.8rem, 3.1vw, 4rem);
+  font-weight: 400;
+  letter-spacing: -.04em;
+  line-height: .92;
+  text-wrap: balance;
+  text-shadow: 0 2px 16px rgba(0, 0, 0, .2);
+}
+.field-notes-page .field-notes-archive .archive-item-read {
+  display: inline-flex;
+  align-items: center;
+  gap: .55rem;
+  margin-top: .25rem;
+  padding-top: .7rem;
+  border-top: 1px solid rgba(243, 236, 223, .35);
+  color: rgba(243, 236, 223, .78);
+  font-size: .53rem;
+  letter-spacing: .13em;
+  text-transform: uppercase;
+  transform: translateY(.25rem);
+  transition: color .3s, transform .35s;
+}
+.field-notes-page .field-notes-archive .archive-item:hover .archive-item-read,
+.field-notes-page .field-notes-archive .archive-item:focus-visible .archive-item-read {
+  color: var(--sand);
+  transform: translateY(0);
+}
+.field-notes-page .field-notes-archive .archive-empty {
+  padding-block: clamp(3rem, 6vw, 5rem);
+}
+
+@media (max-width: 680px) {
+  .field-notes-page .field-notes-archive .archive-item-title {
+    max-width: 320px;
+    font-size: clamp(1.75rem, 8.5vw, 2.8rem);
+  }
+  .field-notes-page .field-notes-archive .archive-item-overlay {
+    padding: 1rem;
+  }
+}

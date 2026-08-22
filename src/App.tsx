@@ -26,7 +26,6 @@ import {
   Compass,
   Download,
   ExternalLink,
-  Eye,
   Filter,
   Headphones,
   Menu,
@@ -597,10 +596,9 @@ function usePublicGuides() {
 }
 
 /**
- * Gallery images for the Field Notes archive. Reads published media assets
- * from the shared store (Supabase public.media_assets). Supabase is the single
- * source of truth; the bundled seed is ONLY the demo-mode fallback when no
- * cloud backend is configured.
+ * Public media used by the social/photo dispatch strip. The editorial Archive
+ * itself is deliberately driven by published blog posts below, so media
+ * library assets and safari packages can never leak into the journal archive.
  */
 function useGalleryItems() {
   const cmsMedia = useCmsStore((state) => state.publicMedia);
@@ -1161,7 +1159,7 @@ function JournalPage({ onOpenPost, onOpenSafari }: { onOpenPost: (slug: string) 
       {journeys.length > 0 && <JournalJourneysSection journeys={journeys} onOpenSafari={onOpenSafari} />}
 
       {/* Field Notes content, merged in below the written journal. */}
-      <FieldNotesSections />
+      <FieldNotesSections onOpenPost={onOpenPost} />
     </div>
   );
 }
@@ -1491,36 +1489,55 @@ function TestimonialsSection() {
 }
 
 /**
- * The former Field Notes page, now rendered as part of the combined
- * Field Notes & Journal destination. Content and markup are unchanged except
- * that testimonials are read live from the CMS.
+ * Field Notes content rendered as part of the combined Field Notes & Journal
+ * destination. The Archive is intentionally sourced from published editorial
+ * posts only; safari packages stay in the separate Journeys section.
  */
-function FieldNotesSections() {
+function FieldNotesSections({ onOpenPost }: { onOpenPost: (slug: string) => void }) {
   const gallery = useGalleryItems();
+  const archivePosts = usePublishedPosts();
   const [filter, setFilter] = useState("All");
-  const [lightbox, setLightbox] = useState<number | null>(null);
-  const filters = ["All", "Wildlife", "Migration", "Lodges", "People", "Landscape"];
-  const visible = gallery.filter((item) => filter === "All" || item.type === filter);
-  const showNext = (direction: number) => setLightbox((current) => current === null ? null : (current + direction + visible.length) % visible.length);
-
-  useEffect(() => {
-    if (lightbox === null) return;
-    const handleKey = (event: globalThis.KeyboardEvent) => {
-      if (event.key === "Escape") setLightbox(null);
-      if (event.key === "ArrowRight") showNext(1);
-      if (event.key === "ArrowLeft") showNext(-1);
-    };
-    window.addEventListener("keydown", handleKey);
-    return () => window.removeEventListener("keydown", handleKey);
-  });
+  const filters = useMemo(() => ["All", ...Array.from(new Set(archivePosts.map((post) => post.category)))], [archivePosts]);
+  const visible = archivePosts.filter((post) => filter === "All" || post.category === filter);
+  const archiveSize = (index: number) => {
+    const rhythm = ["wide", "tall", "standard", "wide", "standard", "standard", "standard"] as const;
+    return rhythm[index % rhythm.length];
+  };
 
   return (
     <>
-      <section className="gallery-section field-notes-archive section-pad"><div className="gallery-header"><SectionHeading number="03" eyebrow="THE ARCHIVE" title="Light, dust, life." /><div className="gallery-filters">{filters.map((item) => <button className={filter === item ? "active" : ""} key={item} onClick={() => setFilter(item)}>{item}</button>)}</div></div><motion.div className="masonry" layout>{visible.map((item, index) => <motion.button layout className={`masonry-item masonry-item--${item.size}`} key={item.src} onClick={() => setLightbox(index)} initial={{ opacity: 0 }} animate={{ opacity: 1 }}><img src={item.src} alt={item.alt} loading="lazy" /><span><small>{item.type}</small><Eye />View</span></motion.button>)}</motion.div></section>
+      <section className="gallery-section field-notes-archive section-pad">
+        <div className="gallery-header">
+          <SectionHeading number="03" eyebrow="THE ARCHIVE" title="Light, dust, life." />
+          {archivePosts.length > 0 && <div className="gallery-filters">{filters.map((item) => <button className={filter === item ? "active" : ""} key={item} onClick={() => setFilter(item)}>{item}</button>)}</div>}
+        </div>
+        {archivePosts.length > 0 ? (
+          <motion.div className="masonry" layout>
+            {visible.map((post, index) => {
+              const size = archiveSize(index);
+              return (
+                <motion.button layout className={`masonry-item archive-item archive-item--${size}`} key={post.id} onClick={() => onOpenPost(post.slug)} aria-label={`Read ${post.title}`} initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+                  <img src={post.heroImage} alt={post.title} loading="lazy" />
+                  <span className="archive-item-overlay">
+                    <span className="archive-item-meta">{post.category} / {formatPostDate(post.publishedAt)}</span>
+                    <strong className="archive-item-title">{post.title}</strong>
+                    <span className="archive-item-read">Read field note <ArrowRight size={15} /></span>
+                  </span>
+                </motion.button>
+              );
+            })}
+          </motion.div>
+        ) : (
+          <div className="journal-empty archive-empty" data-reveal>
+            <p className="eyebrow">THE ARCHIVE</p>
+            <h3>New field notes are being written.</h3>
+            <p>Published editorial stories appear here as they are added to the CMS.</p>
+          </div>
+        )}
+      </section>
       <section className="drone-film"><video controls playsInline preload="none" poster={imagery.heroPoster}><source src={imagery.heroVideo} type="video/mp4" /></video><div><p className="eyebrow">FROM ABOVE / 01:12</p><h2>The migration draws its own map.</h2><p>Film by our Serengeti field team.</p></div></section>
       <TestimonialsSection />
       <section className="instagram-strip section-pad"><p className="eyebrow">@OLKINYEIEXPEDITIONS</p><h2>Dispatches from the field.</h2><a href="https://www.instagram.com" target="_blank" rel="noreferrer">Follow on Instagram <ExternalLink size={15} /></a><div>{gallery.slice(2, 7).map((item) => <a key={item.src} href="https://www.instagram.com" target="_blank" rel="noreferrer" aria-label="View field dispatch on Instagram"><img src={item.src} alt="" loading="lazy" /></a>)}</div></section>
-      <AnimatePresence>{lightbox !== null && <motion.div className="lightbox" role="dialog" aria-modal="true" aria-label="Gallery lightbox" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}><button className="lightbox-close" onClick={() => setLightbox(null)} aria-label="Close lightbox"><X /></button><button className="lightbox-prev" onClick={() => showNext(-1)} aria-label="Previous image"><ArrowLeft /></button><motion.img key={visible[lightbox].src} src={visible[lightbox].src} alt={visible[lightbox].alt} initial={{ opacity: 0.4, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} /><button className="lightbox-next" onClick={() => showNext(1)} aria-label="Next image"><ArrowRight /></button><p>{String(lightbox + 1).padStart(2, "0")} / {String(visible.length).padStart(2, "0")} &nbsp; {visible[lightbox].alt}</p></motion.div>}</AnimatePresence>
     </>
   );
 }
