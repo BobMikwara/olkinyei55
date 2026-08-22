@@ -157,6 +157,27 @@ describe("CMS Settings persistence (Supabase cms_content → store → public)",
     expect(store!.getState().siteSettings.maintenanceMode).toBe(!before);
   });
 
+  it("preserves logo, contact, and nested analytics settings across a reload", async () => {
+    const current = store!.getState().siteSettings;
+    const ok = await store!.actions.updateSiteSettings({
+      logo: "/new-logo.svg",
+      contactEmail: "hello@example.com",
+      analytics: { ...current.analytics, fbPixel: "FB-123456" },
+    });
+    expect(ok).toBe(true);
+
+    const reloaded = await loadAppModules();
+    await waitFor(() => reloaded!.getState().siteSettings.logo === "/new-logo.svg");
+    const state = reloaded!.getState();
+    expect(state.siteSettings.contactEmail).toBe("hello@example.com");
+    expect(state.siteSettings.analytics.fbPixel).toBe("FB-123456");
+    // The nested merge must keep the previously saved analytics tokens.
+    expect(state.siteSettings.analytics.ga4).toBe(current.analytics.ga4);
+    expect(state.siteSettings.analytics.gtm).toBe(current.analytics.gtm);
+    // Public website slice receives the same document.
+    expect(state.publicSiteSettings.logo).toBe("/new-logo.svg");
+  });
+
   it("syncs the Settings form with persisted values after the async DB load / refresh", async () => {
     // New fresh module stack so the form mounts before/while the DB loads.
     const fresh = await loadAppModules();

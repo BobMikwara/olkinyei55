@@ -3803,7 +3803,10 @@ const actions = {
       return false;
     }
     const previous = state.siteSettings;
-    state = { ...state, siteSettings: { ...state.siteSettings, ...patch } };
+    // Merge nested structures rather than shallow-replacing them, so a partial
+    // `analytics`/`addresses`/`social` patch from a caller can never erase the
+    // other persisted analytics tokens or configuration.
+    state = { ...state, siteSettings: mergeSiteSettings(state.siteSettings, patch) };
     logActivity("updated", "Site Settings", "global", "Global site settings");
     emit();
     try {
