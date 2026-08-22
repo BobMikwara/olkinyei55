@@ -52,12 +52,20 @@ import {
   timeline,
 } from "./data";
 import {
+  cloudUnavailableReason,
   getCloudBookings,
   hasCloudBackend,
   persistBooking,
   subscribeToBookings,
   supabase,
 } from "./lib/supabase";
+import { getPackageBySlug } from "./lib/cms";
+import {
+  hasSafariIdentity,
+  packageRowToSafari,
+  safariPackageToSafari,
+  type DbPackageRow,
+} from "./lib/packageModel";
 import { store as cmsStore, useStore as useCmsStore } from "./admin/store";
 import { SOURCE_LABELS } from "./admin/reviewProviders";
 
@@ -402,6 +410,11 @@ function HomePage({ navigate, content, openSafari, onOpenPost }: { navigate: (pa
   const cmsHome = useCmsStore((state) => state.publicPages.find((item) => item.route === "/"));
   const site = useCmsStore((state) => state.publicSiteSettings);
   const liveSafaris = usePublishedSafaris();
+  // The migration CTA opens the package that actually describes the
+  // migration — never an arbitrary "first package returned by Supabase".
+  const migrationSafari = useMemo(() => (
+    liveSafaris.find((safari) => /migration/i.test(`${safari.title} ${safari.region} ${safari.summary}`)) ?? null
+  ), [liveSafaris]);
   // Live blog posts from the CMS (Supabase blog_posts). Published only;
   // featured first, then newest. Static seed is ONLY the demo-mode fallback
   // when no cloud backend is configured; in cloud mode an empty DB renders
@@ -446,7 +459,7 @@ function HomePage({ navigate, content, openSafari, onOpenPost }: { navigate: (pa
       <section className="manifesto section-pad"><p className="vertical-label">THE OLKINYEI WAY</p><div className="manifesto-copy"><p className="eyebrow" data-reveal>Not a tour. A rare point of view.</p><h2 className="split-reveal">{content.homeStatement}</h2><button className="text-link" onClick={() => navigate("about")}>Discover our philosophy <ArrowRight size={16} /></button></div></section>
       <section className="migration-story">
         <div className="migration-image"><img src={imagery.migration} alt="A vast wildebeest herd crossing the Serengeti" loading="lazy" data-parallax /></div><div className="migration-overlay" />
-        <div className="migration-copy"><p className="eyebrow">01 / THE GREAT MOVEMENT</p><h2 className="split-reveal">Two million lives.<br />One ancient instinct.</h2><p>We follow the rains north, positioning private camps near the migration without crowding its path.</p><button className="text-link text-link--light" onClick={() => liveSafaris[0] && openSafari(liveSafaris[0])}>Follow the migration <ArrowRight size={16} /></button></div>
+        <div className="migration-copy"><p className="eyebrow">01 / THE GREAT MOVEMENT</p><h2 className="split-reveal">Two million lives.<br />One ancient instinct.</h2><p>We follow the rains north, positioning private camps near the migration without crowding its path.</p><button className="text-link text-link--light" onClick={() => migrationSafari ? openSafari(migrationSafari) : navigate("experiences")}>Follow the migration <ArrowRight size={16} /></button></div>
         <div className="migration-track" aria-hidden="true"><span /><span /><span /><span /><span /><span /><span /></div>
       </section>
       <section className="journeys section-pad">
@@ -530,39 +543,19 @@ function AboutPage({ navigate }: { navigate: (page: Page) => void }) {
 }
 
 /**
- * Published safari packages from the CMS. The public site keeps the database
- * slug as the canonical route identifier so `/safaris/<slug>` always resolves
- * to the existing Supabase record.
+ * Published safari packages from the CMS (Supabase public.packages is the
+ * single source of truth — never localStorage, never seed/demo arrays). The
+ * public site keeps the database slug as the canonical route identifier so
+ * `/safaris/<slug>` always resolves to the existing Supabase record. Every
+ * consumer (listing cards, details page, More Journeys, booking prefill)
+ * receives the SAME normalized model via `safariPackageToSafari`.
  */
 function usePublishedSafaris(): Safari[] {
   const cmsPackages = useCmsStore((state) => state.publicPackages);
   return useMemo(() => {
-    const live = cmsPackages.filter((pkg) => pkg.published && !pkg.archived);
-    return live.map((pkg) => ({
-      id: pkg.slug || pkg.id,
-      slug: pkg.slug || pkg.id,
-      title: pkg.title,
-      region: pkg.region,
-      duration: pkg.duration,
-      nights: pkg.nights,
-      price: pkg.price,
-      image: pkg.image,
-      gallery: pkg.gallery.length > 0 ? pkg.gallery : [pkg.image],
-      summary: pkg.summary,
-      description: pkg.description || pkg.summary,
-      signature: pkg.signature,
-      highlights: pkg.highlights,
-      included: pkg.included,
-      excluded: pkg.excluded,
-      availability: pkg.availability,
-      coordinates: pkg.coordinates,
-      country: pkg.country,
-      parks: pkg.parks,
-      wildlife: pkg.wildlife,
-      tags: pkg.tags,
-      featured: pkg.featured,
-      seo: pkg.seo,
-    }));
+    return cmsPackages
+      .filter((pkg) => pkg.published && !pkg.archived)
+      .map(safariPackageToSafari);
   }, [cmsPackages]);
 }
 
@@ -631,10 +624,60 @@ function useGalleryItems() {
   }, [cmsMedia]);
 }
 
-function ExperiencesPage({ openSafari, onBook }: { openSafari: (safari: Safari) => void; onBook: (safari: Safari) => void }) {
+export function ExperiencesPage({ openSafari, onBook }: { openSafari: (safari: Safari) => void; onBook: (safari: Safari | null) => void }) {
   const [region, setRegion] = useState("All");
   const liveSafaris = usePublishedSafaris();
+  const readStatus = useCmsStore((state) => state.publicPackagesStatus);
+  const readError = useCmsStore((state) => state.publicPackagesError);
   const visible = liveSafaris.filter((safari) => region === "All" || safari.region.includes(region));
+
+  // Honest states — a broken Supabase read is never disguised as "no content".
+  if (readStatus === "unconfigured" && liveSafaris.length === 0) {
+    return (
+      <>
+        <PageHero page="experiences" eyebrow="PRIVATE SAFARIS" title="Journeys measured in moments." text="Eight signature routes, each privately guided and shaped around your pace." image={imagery.cheetah} />
+        <section className="experiences-intro section-pad">
+          <SectionHeading number="01" eyebrow="THE COLLECTION" title="A starting point, never a fixed itinerary." text="Choose the feeling that draws you. We will tailor the route, camps and rhythm to the season and the people travelling." />
+          <div className="journal-empty" data-reveal>
+            <p className="eyebrow">SUPABASE NOT CONFIGURED</p>
+            <h3>This build cannot reach the safari database.</h3>
+            <p>{cloudUnavailableReason()} No demo packages are shown in its place.</p>
+          </div>
+        </section>
+      </>
+    );
+  }
+  if (readStatus === "error" && liveSafaris.length === 0) {
+    return (
+      <>
+        <PageHero page="experiences" eyebrow="PRIVATE SAFARIS" title="Journeys measured in moments." text="Eight signature routes, each privately guided and shaped around your pace." image={imagery.cheetah} />
+        <section className="experiences-intro section-pad">
+          <SectionHeading number="01" eyebrow="THE COLLECTION" title="A starting point, never a fixed itinerary." text="Choose the feeling that draws you. We will tailor the route, camps and rhythm to the season and the people travelling." />
+          <div className="journal-empty" data-reveal>
+            <p className="eyebrow">SAFARIS UNAVAILABLE</p>
+            <h3>The safari query could not be read from Supabase.</h3>
+            <p>Your packages are still in the CMS — the public read failed: <code>{readError || "unknown error"}</code></p>
+            <button className="text-link" onClick={() => void cmsStore.refreshPublicPackages()}>Retry the query <ArrowRight size={16} /></button>
+          </div>
+        </section>
+      </>
+    );
+  }
+  if ((readStatus === "loading" || readStatus === "idle") && liveSafaris.length === 0) {
+    return (
+      <>
+        <PageHero page="experiences" eyebrow="PRIVATE SAFARIS" title="Journeys measured in moments." text="Eight signature routes, each privately guided and shaped around your pace." image={imagery.cheetah} />
+        <section className="experiences-intro section-pad">
+          <SectionHeading number="01" eyebrow="THE COLLECTION" title="A starting point, never a fixed itinerary." text="Choose the feeling that draws you. We will tailor the route, camps and rhythm to the season and the people travelling." />
+          <div className="journal-empty" data-reveal>
+            <p className="eyebrow">LOADING JOURNEYS</p>
+            <h3>Fetching safaris from Supabase…</h3>
+            <p>The published package collection is being read from the database.</p>
+          </div>
+        </section>
+      </>
+    );
+  }
   if (liveSafaris.length === 0) {
     return (
       <>
@@ -644,7 +687,7 @@ function ExperiencesPage({ openSafari, onBook }: { openSafari: (safari: Safari) 
           <div className="journal-empty" data-reveal>
             <p className="eyebrow">NO SAFARIS PUBLISHED</p>
             <h3>Safaris are being crafted.</h3>
-            <p>Published safari packages from the CMS appear here instantly across every device.</p>
+            <p>The Supabase query succeeded and returned zero published packages. Publish a package in the CMS and it appears here instantly.</p>
           </div>
         </section>
       </>
@@ -652,8 +695,8 @@ function ExperiencesPage({ openSafari, onBook }: { openSafari: (safari: Safari) 
   }
   return (
     <><PageHero page="experiences" eyebrow="PRIVATE SAFARIS" title="Journeys measured in moments." text="Eight signature routes, each privately guided and shaped around your pace." image={imagery.cheetah} /><section className="experiences-intro section-pad"><SectionHeading number="01" eyebrow="THE COLLECTION" title="A starting point, never a fixed itinerary." text="Choose the feeling that draws you. We will tailor the route, camps and rhythm to the season and the people travelling." /><div className="filter-bar" aria-label="Filter safaris by region"><Filter size={15} />{["All", "Serengeti", "Maasai Mara", "Tanzania"].map((item) => <button key={item} className={region === item ? "active" : ""} onClick={() => setRegion(item)}>{item}</button>)}</div></section>
-      <section className="experience-catalogue">{visible.map((safari, index) => <article className="experience-item" key={safari.id} data-reveal><button className="experience-image" onClick={() => openSafari(safari)} aria-label={`View ${safari.title}`}><img src={safari.image} alt={`${safari.title} in ${safari.region}`} loading="lazy" /><span>View journey <ArrowRight /></span></button><div className="experience-number">{String(index + 1).padStart(2, "0")}</div><div className="experience-info"><p>{safari.region}</p><h2>{safari.title}</h2><p>{safari.summary}</p><dl><div><dt>Time</dt><dd>{safari.duration}</dd></div><div><dt>From</dt><dd>{formatCurrency(safari.price)} pp</dd></div><div><dt>Season</dt><dd>{safari.availability.slice(0, 4).join(" / ")}</dd></div></dl><div className="experience-actions"><button className="text-link" onClick={() => openSafari(safari)}>View details <ArrowRight size={16} /></button><button className="text-link" onClick={() => onBook(safari)}>Book now <ArrowRight size={16} /></button></div></div></article>)}</section>
-      <section className="bespoke-banner"><div><p className="eyebrow">SOMETHING ELSE IN MIND?</p><h2>Let us make the map around you.</h2><p>Tell us what you love, who is travelling and how you want to feel. We will begin with a blank page.</p></div><MagneticButton className="button button--sand" onClick={() => liveSafaris[0] && onBook(liveSafaris[0])}>Create a bespoke safari <ArrowRight size={17} /></MagneticButton></section></>
+      <section className="experience-catalogue">{visible.map((safari, index) => <article className="experience-item" key={safari.id} data-reveal><button className="experience-image" onClick={() => openSafari(safari)} aria-label={`View ${safari.title}`}>{safari.image ? <img src={safari.image} alt={`${safari.title} in ${safari.region}`} loading="lazy" /> : null}<span>View journey <ArrowRight /></span></button><div className="experience-number">{String(index + 1).padStart(2, "0")}</div><div className="experience-info"><p>{safari.region}</p><h2>{safari.title}</h2><p>{safari.summary}</p><dl><div><dt>Time</dt><dd>{safari.duration || "—"}</dd></div><div><dt>From</dt><dd>{safari.price > 0 ? `${formatCurrency(safari.price)} pp` : "On request"}</dd></div>{safari.availability.length > 0 ? <div><dt>Season</dt><dd>{safari.availability.slice(0, 4).join(" / ")}</dd></div> : null}</dl><div className="experience-actions"><button className="text-link" onClick={() => openSafari(safari)}>View details <ArrowRight size={16} /></button><button className="text-link" onClick={() => onBook(safari)}>Book now <ArrowRight size={16} /></button></div></div></article>)}</section>
+      <section className="bespoke-banner"><div><p className="eyebrow">SOMETHING ELSE IN MIND?</p><h2>Let us make the map around you.</h2><p>Tell us what you love, who is travelling and how you want to feel. We will begin with a blank page.</p></div><MagneticButton className="button button--sand" onClick={() => onBook(null)}>Create a bespoke safari <ArrowRight size={17} /></MagneticButton></section></>
   );
 }
 
@@ -662,8 +705,7 @@ function SafariMap({ selected, onSelect }: { selected: Destination; onSelect: (d
   return <div className="safari-map"><svg viewBox="0 0 100 100" role="img" aria-label="Interactive map of safari destinations in Kenya and Tanzania"><defs><filter id="soft"><feGaussianBlur stdDeviation="1.2" /></filter></defs><path d="M28 7L69 12 88 32 83 55 70 94 31 89 15 55 18 25Z" fill="#273024" stroke="#8d916f" strokeWidth=".4" /><path d="M20 37C43 28 57 42 84 30M28 62C48 52 62 65 79 58" fill="none" stroke="#6f765a" strokeWidth=".35" strokeDasharray="2 2" /><path d="M25 65C36 60 44 72 58 67S74 72 82 65" fill="none" stroke="#b9b497" opacity=".45" filter="url(#soft)" /></svg>{destinationList.map((destination) => <button key={destination.name} className={selected.name === destination.name ? "active" : ""} style={{ left: `${destination.coordinates[0]}%`, top: `${destination.coordinates[1]}%` }} onClick={() => onSelect(destination)} aria-label={`Select ${destination.name}`}><span /><small>{destination.name}</small></button>)}<p className="map-kenya">KENYA</p><p className="map-tanzania">TANZANIA</p></div>;
 }
 
-function DestinationsPage({ onBook, openDestination }: { onBook: (safari: Safari) => void; openDestination: (destination: Destination) => void }) {
-  const liveSafaris = usePublishedSafaris();
+function DestinationsPage({ onBook, openDestination }: { onBook: (safari: Safari | null) => void; openDestination: (destination: Destination) => void }) {
   const destinationList = useDestinations();
   const [country, setCountry] = useState<"All" | "Kenya" | "Tanzania">("All");
   const [selected, setSelected] = useState<Destination | null>(destinationList[0] ?? null);
@@ -688,7 +730,7 @@ function DestinationsPage({ onBook, openDestination }: { onBook: (safari: Safari
   }
   return (
     <><PageHero page="destinations" eyebrow="KENYA + TANZANIA" title="The map is only the beginning." text="From volcanic highlands to endless grassland, explore the places that shape our journeys." image={imagery.mara} /><section className="destinations-map-section"><div className="map-side"><p className="eyebrow">01 / EXPLORE EAST AFRICA</p><h2 className="split-reveal">Move through the wild.</h2><div className="country-switch">{(["All", "Kenya", "Tanzania"] as const).map((item) => <button key={item} onClick={() => setCountry(item)} className={country === item ? "active" : ""}>{item}</button>)}</div><div className="destination-list">{list.map((item) => <button key={item.slug || item.name} className={selected?.name === item.name ? "active" : ""} onClick={() => setSelected(item)}><span>{item.country}</span>{item.name}<ArrowRight /></button>)}</div></div>{selected ? <><SafariMap selected={selected} onSelect={setSelected} /><AnimatePresence mode="wait"><motion.div className="destination-focus" key={selected.slug || selected.name} initial={{ opacity: 0, y: 25 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -15 }}><img src={selected.image} alt={`${selected.name} landscape`} /><div><p>{selected.country}</p><h3>{selected.name}</h3><p>{selected.description}</p><dl><div><dt>Best time</dt><dd>{selected.best}</dd></div><div><dt>Known for</dt><dd>{selected.animal}</dd></div></dl><button className="text-link" onClick={() => openDestination(selected)}>Explore destination <ArrowRight size={16} /></button></div></motion.div></AnimatePresence></> : null}</section>
-      <section className="destination-editorial section-pad"><SectionHeading number="02" eyebrow="TWO COUNTRIES, ONE ECOSYSTEM" title="Cross the border. Keep the story whole." text="The migration ignores national lines. Combining Kenya and Tanzania reveals the full movement of herds, weather and seasons." /><div className="country-stories"><article><ImageReveal src={imagery.lion} alt="Lion in the Maasai Mara" /><span>KENYA</span><h3>Intimate conservancies and the open Mara.</h3><p>Night drives, walking and fewer vehicles beyond reserve boundaries.</p></article><article><ImageReveal src={imagery.crater} alt="Wildebeest on Tanzania grassland" /><span>TANZANIA</span><h3>Scale that changes your sense of distance.</h3><p>The Serengeti, crater highlands and elephant paths of Tarangire.</p></article></div></section><section className="map-cta"><p>Not sure where the season will take you?</p><h2>Let the wildlife choose the route.</h2><MagneticButton className="button button--sand" onClick={() => liveSafaris[0] && onBook(liveSafaris[0])}>Talk to a safari designer <ArrowRight size={17} /></MagneticButton></section></>
+      <section className="destination-editorial section-pad"><SectionHeading number="02" eyebrow="TWO COUNTRIES, ONE ECOSYSTEM" title="Cross the border. Keep the story whole." text="The migration ignores national lines. Combining Kenya and Tanzania reveals the full movement of herds, weather and seasons." /><div className="country-stories"><article><ImageReveal src={imagery.lion} alt="Lion in the Maasai Mara" /><span>KENYA</span><h3>Intimate conservancies and the open Mara.</h3><p>Night drives, walking and fewer vehicles beyond reserve boundaries.</p></article><article><ImageReveal src={imagery.crater} alt="Wildebeest on Tanzania grassland" /><span>TANZANIA</span><h3>Scale that changes your sense of distance.</h3><p>The Serengeti, crater highlands and elephant paths of Tarangire.</p></article></div></section><section className="map-cta"><p>Not sure where the season will take you?</p><h2>Let the wildlife choose the route.</h2><MagneticButton className="button button--sand" onClick={() => onBook(null)}>Talk to a safari designer <ArrowRight size={17} /></MagneticButton></section></>
   );
 }
 
@@ -700,72 +742,287 @@ function matchesDestination(safari: Safari, destination: Destination) {
     || Boolean(safari.country?.includes(destination.country));
 }
 
-function SafariDetailPage({ slug, onBack, onBook, openDestination, openSafari }: { slug: string; onBack: () => void; onBook: (safari: Safari) => void; openDestination: (destination: Destination) => void; openSafari: (safari: Safari) => void }) {
+// ============ Safari route map ============
+// A minimal, elegant route visual built entirely from the selected package's
+// own itinerary data (parks / region / country). It never introduces a second
+// data source — it only reads the existing CMS package and destination records
+// to resolve coordinates, so every package draws its own route.
+type RouteStop = { name: string; point: [number, number]; country?: string };
+
+// Coordinates for a few well-known East African locations that are referenced
+// by packages but may not yet be published destinations. This is map geometry
+// only — it does not add, replace or duplicate any package data.
+const ROUTE_COORDS: Record<string, [number, number]> = {
+  laikipia: [42, 30],
+  ndutu: [43, 52],
+  zanzibar: [62, 88],
+  eyasi: [51, 76],
+};
+
+function routeKey(name: string) {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+function stopCountry(name: string, country?: string): string | undefined {
+  if (country) return country;
+  const location = name.toLowerCase();
+  if (location.includes("mara") || location.includes("laikipia") || location.includes("amboseli") || location.includes("tsavo") || location.includes("kenya")) return "Kenya";
+  if (location.includes("serengeti") || location.includes("ngorongoro") || location.includes("tarangire") || location.includes("manyara") || location.includes("zanzibar") || location.includes("ndutu") || location.includes("eyasi") || location.includes("kilimanjaro") || location.includes("tanzania")) return "Tanzania";
+  return undefined;
+}
+
+function isZeroPoint(point: [number, number]) {
+  return point[0] === 0 && point[1] === 0;
+}
+
+function buildSafariRoute(safari: Safari, destinations: Destination[]): RouteStop[] {
+  let names = (safari.parks ?? []).filter(Boolean);
+  if (names.length === 0 && safari.region) {
+    names = safari.region.split(/\s*(?:\+|\/|,|&)\s*/).filter(Boolean);
+  }
+  const stops: RouteStop[] = [];
+  const seen = new Set<string>();
+  for (const raw of names) {
+    const name = raw.trim();
+    if (!name) continue;
+    const key = routeKey(name);
+    const dest = destinations.find((d) => routeKey(d.name) === key)
+      ?? destinations.find((d) => d.name.toLowerCase().includes(name.toLowerCase()) || name.toLowerCase().includes(d.name.toLowerCase()));
+    let point: [number, number] | undefined = dest?.coordinates ?? ROUTE_COORDS[key] ?? safari.coordinates;
+    if (!point || isZeroPoint(point)) continue;
+    const pointKey = `${point[0]}-${point[1]}`;
+    if (seen.has(pointKey)) continue;
+    seen.add(pointKey);
+    stops.push({ name, point, country: dest?.country });
+  }
+  if (stops.length === 0) {
+    const fallback: [number, number] = safari.coordinates && !isZeroPoint(safari.coordinates) ? safari.coordinates : [50, 50];
+    stops.push({ name: safari.region || safari.title, point: fallback });
+  }
+  return stops;
+}
+
+// Catmull-Rom to cubic bezier, producing a single flowing path through the stops.
+function smoothRoutePath(points: [number, number][]): string {
+  if (points.length < 2) return "";
+  let d = `M ${points[0][0]} ${points[0][1]}`;
+  for (let i = 0; i < points.length - 1; i += 1) {
+    const p0 = points[i - 1] ?? points[i];
+    const p1 = points[i];
+    const p2 = points[i + 1];
+    const p3 = points[i + 2] ?? p2;
+    const c1x = p1[0] + (p2[0] - p0[0]) / 6;
+    const c1y = p1[1] + (p2[1] - p0[1]) / 6;
+    const c2x = p2[0] - (p3[0] - p1[0]) / 6;
+    const c2y = p2[1] - (p3[1] - p1[1]) / 6;
+    d += ` C ${c1x} ${c1y}, ${c2x} ${c2y}, ${p2[0]} ${p2[1]}`;
+  }
+  return d;
+}
+
+function SafariRouteMap({ safari }: { safari: Safari }) {
+  const destinations = useDestinations();
+  const stops = useMemo(() => buildSafariRoute(safari, destinations), [safari, destinations]);
+  if (stops.length === 0) return null;
+
+  // Normalise the package's own destination coordinates into a fixed 0–100 box
+  // so the route consistently fills the map card while keeping its shape.
+  const pad = 6;
+  const xs = stops.map((stop) => stop.point[0]);
+  const ys = stops.map((stop) => stop.point[1]);
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
+  const rangeX = maxX - minX || 1;
+  const rangeY = maxY - minY || 1;
+  const normalised: [number, number][] = stops.length === 1
+    ? [[50, 50]]
+    : stops.map((stop) => [
+      pad + (stop.point[0] - minX) / rangeX * (100 - 2 * pad),
+      pad + (stop.point[1] - minY) / rangeY * (100 - 2 * pad),
+    ]);
+  const path = smoothRoutePath(normalised);
+  const stopListId = `route-stops-${routeKey(safari.title)}`;
+
+  return (
+    <section className="route-section" data-reveal>
+      <div className="route-head">
+        <p className="eyebrow">THE ROUTE</p>
+        <h2>Where this journey takes you.</h2>
+        <p className="route-sub">The places your expedition moves through, in order.</p>
+      </div>
+      <figure className="safari-route-map">
+        <div className="safari-route-map-main">
+          <svg viewBox="0 0 100 100" role="img" aria-labelledby={`route-title-${routeKey(safari.title)} ${stopListId}`}>
+            <title id={`route-title-${routeKey(safari.title)}`}>Route map for {safari.title}</title>
+            {path && <path className="route-line-glow" d={path} />}
+            {path && <path className="route-line" d={path} />}
+            {stops.map((stop, index) => (
+              <g key={`${stop.name}-${index}`} className="route-stop" transform={`translate(${normalised[index][0]} ${normalised[index][1]})`}>
+                <circle className="route-mark" r="2.7" />
+                <circle className="route-mark-inner" r="1.05" />
+                <text className="route-num" x="0" y="-3.4">{index + 1}</text>
+                <text className="route-name" x="0" y="4.8">{stop.name}</text>
+              </g>
+            ))}
+            {stops.some((stop) => stopCountry(stop.name, stop.country) === "Kenya") && <text className="route-region" x="82" y="15">KENYA</text>}
+            {stops.some((stop) => stopCountry(stop.name, stop.country) === "Tanzania") && <text className="route-region route-region--tz" x="20" y="90">TANZANIA</text>}
+          </svg>
+        </div>
+        <figcaption className="route-stops" id={stopListId}>
+          <p className="route-stops-title">Expedition route</p>
+          <ol>
+            {stops.map((stop, index) => (
+              <li key={`${stop.name}-${index}`}>
+                <em>{String(index + 1).padStart(2, "0")}</em>
+                <strong>{stop.name}</strong>
+              </li>
+            ))}
+          </ol>
+        </figcaption>
+      </figure>
+    </section>
+  );
+}
+
+/**
+ * Details-page data path: URL slug → Supabase `getPackageBySlug` → matching
+ * package → render. Never guesses, never falls back to another package, and
+ * distinguishes loading / read-failure / not-found so a database problem can
+ * never masquerade as a design problem.
+ */
+function useSafariBySlug(slug: string) {
+  const [attempt, setAttempt] = useState(0);
+  const [result, setResult] = useState<{ status: "loading" | "success" | "not-found" | "error"; safari: Safari | null; message: string }>({ status: "loading", safari: null, message: "" });
+  useEffect(() => {
+    let cancelled = false;
+    setResult({ status: "loading", safari: null, message: "" });
+    getPackageBySlug(slug)
+      .then((row) => {
+        if (cancelled) return;
+        const safari = row ? packageRowToSafari(row as DbPackageRow) : null;
+        setResult(safari
+          ? { status: "success", safari, message: "" }
+          : { status: "not-found", safari: null, message: "" });
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setResult({ status: "error", safari: null, message: error instanceof Error ? error.message : String(error) });
+      });
+    return () => { cancelled = true; };
+  }, [slug, attempt]);
+  return { ...result, retry: () => setAttempt((current) => current + 1) };
+}
+
+export function SafariDetailPage({ slug, onBack, onBook, openSafari }: { slug: string; onBack: () => void; onBook: (safari: Safari) => void; openSafari: (safari: Safari) => void }) {
   const safaris = usePublishedSafaris();
-  const destinationList = useDestinations();
-  const safari = safaris.find((item) => (item.slug || item.id) === slug);
-  const relatedDestinations = useMemo(() => destinationList.filter((destination) => safari ? matchesDestination(safari, destination) : false), [destinationList, safari]);
-  const relatedSafaris = useMemo(() => safaris.filter((item) => (item.slug || item.id) !== slug).slice(0, 3), [safaris, slug]);
+  // The details page loads the SELECTED package directly from Supabase by its
+  // slug. While that query runs, the (same-source) listing entry avoids a
+  // loading flash; the direct result wins as soon as it lands.
+  const listed = safaris.find((item) => (item.slug || item.id) === slug) ?? null;
+  const { status, safari: directSafari, message, retry } = useSafariBySlug(slug);
+  const safari = directSafari ?? (status === "loading" ? listed : null);
+  // Every OTHER valid published package from the same Supabase source. The
+  // current package is excluded; nothing unrelated is ever offered. No hard
+  // slice: the section shows every remaining package (hidden when none exist).
+  const relatedSafaris = useMemo(() => safaris.filter((item) => hasSafariIdentity(item) && (item.slug || item.id) !== slug), [safaris, slug]);
 
   useEffect(() => { window.scrollTo({ top: 0, behavior: "instant" }); }, [slug]);
 
-  if (!safari) {
-    return <section className="journal-page section-pad"><div className="journal-empty" data-reveal><p className="eyebrow">SAFARI NOT FOUND</p><h3>This safari is not available right now.</h3><p>The record may have been unpublished, the slug may have changed, or the public query is not reaching the published package yet.</p><button className="text-link" onClick={onBack}>Back to all safaris <ArrowRight size={16} /></button></div></section>;
+  if (status === "error") {
+    return (
+      <section className="journal-page section-pad">
+        <div className="journal-empty" data-reveal>
+          <p className="eyebrow">SAFARI QUERY FAILED</p>
+          <h3>The journey record could not be read from Supabase.</h3>
+          <p>The package data still exists in the CMS — this is a read-path failure, not missing content. Details: <code>{message}</code></p>
+          <div className="safari-detail-actions">
+            <button className="text-link" onClick={retry}>Retry query <ArrowRight size={16} /></button>
+            <button className="text-link" onClick={onBack}>Back to all safaris <ArrowRight size={16} /></button>
+          </div>
+        </div>
+      </section>
+    );
   }
+
+  if (!safari && status === "not-found") {
+    return <section className="journal-page section-pad"><div className="journal-empty" data-reveal><p className="eyebrow">SAFARI NOT FOUND</p><h3>No published safari matches this address.</h3><p>The slug may have changed in the CMS, or the package is not published. No other package is shown in its place.</p><button className="text-link" onClick={onBack}>Back to all safaris <ArrowRight size={16} /></button></div></section>;
+  }
+
+  if (!safari) {
+    return (
+      <section className="journal-page section-pad">
+        <div className="journal-empty" data-reveal>
+          <p className="eyebrow">LOADING JOURNEY</p>
+          <h3>Fetching this safari from Supabase…</h3>
+          <p>The package record is being read from the database by its slug.</p>
+        </div>
+      </section>
+    );
+  }
+
+  const heroImage = safari.image || (safari.gallery && safari.gallery.length > 0 ? safari.gallery[0] : "");
+  // The gallery shows additional images that belong to THIS package only. The
+  // hero image is never duplicated; a package whose gallery holds only its
+  // primary image simply renders no gallery section (no blank blocks).
+  const galleryImages = (safari.gallery && safari.gallery.length > 0
+    ? safari.gallery.filter((url) => url.trim().length > 0 && url.trim() !== heroImage.trim())
+    : []);
+  const includedItems = safari.included || [];
+  const excludedItems = safari.excluded || [];
 
   return (
     <>
       <section className="detail-hero">
-        <img src={safari.image} alt={`${safari.title} hero`} className="detail-hero-image" />
-        <div className="page-hero-wash" />
+        {heroImage ? <img src={heroImage} alt={`${safari.title} hero`} className="detail-hero-image" fetchPriority="high" /> : <div className="detail-hero-placeholder" aria-hidden="true" />}
+        <div className="detail-hero-wash" />
         <div className="detail-hero-copy">
           <button className="text-link detail-back" onClick={onBack}><ArrowLeft size={15} /> All safaris</button>
-          <p className="eyebrow">{safari.region}</p>
+          <p className="eyebrow">{safari.region || "Private safari"}</p>
           <h1 className="split-reveal">{safari.title}</h1>
-          <p>{safari.description || safari.summary}</p>
-          <div className="detail-meta"><span><Clock3 size={15} />{safari.duration}</span><span><CircleDollarSign size={15} />From {formatCurrency(safari.price)} per person</span><span><CalendarDays size={15} />{safari.availability.join(" / ") || "Year-round"}</span></div>
+          <p className="detail-hero-text">{safari.description || safari.summary}</p>
+          <div className="detail-meta">
+            {(safari.duration || safari.nights > 0) && <span><Clock3 size={15} />{safari.duration || `${safari.nights} nights`}</span>}
+            {safari.price > 0 && <span><CircleDollarSign size={15} />From {formatCurrency(safari.price)} pp</span>}
+            {(safari.availability && safari.availability.length > 0) && <span><CalendarDays size={15} />{safari.availability.join(" / ")}</span>}
+          </div>
           <div className="detail-cta-row"><MagneticButton className="button button--sand" onClick={() => onBook(safari)}>Book this safari <ArrowRight size={17} /></MagneticButton></div>
         </div>
       </section>
 
-      <section className="detail-shell section-pad">
-        <div className="detail-grid">
-          <article className="detail-card" data-reveal>
-            <p className="eyebrow">OVERVIEW</p>
-            <h2>Journey highlights</h2>
-            <p>{safari.summary}</p>
-            {safari.highlights && safari.highlights.length > 0 ? <ul className="detail-list">{safari.highlights.map((item) => <li key={item}><Check size={15} />{item}</li>)}</ul> : null}
-          </article>
-          <article className="detail-card" data-reveal>
-            <p className="eyebrow">WHAT'S INCLUDED</p>
-            <h2>Travel with clarity</h2>
-            <div className="detail-columns">
-              <div><h3>Included</h3><ul className="detail-list">{safari.included.map((item) => <li key={item}><Check size={15} />{item}</li>)}</ul></div>
-              <div><h3>Not included</h3><ul className="detail-list">{safari.excluded.map((item) => <li key={item}><Minus size={15} />{item}</li>)}</ul></div>
-            </div>
-          </article>
+      <section className="detail-shell">
+        <div className="detail-shell-inner">
+          <SafariRouteMap safari={safari} />
+
+          <div className="detail-grid">
+            <article className="detail-card" data-reveal>
+              <p className="eyebrow">OVERVIEW</p>
+              <h2>Journey highlights</h2>
+              <p className="detail-card-copy">{safari.summary || safari.description}</p>
+              {safari.signature ? <p className="detail-signature">{safari.signature}</p> : null}
+              {safari.highlights && safari.highlights.length > 0 ? <ul className="detail-list">{safari.highlights.map((item) => <li key={item}><Check size={15} />{item}</li>)}</ul> : null}
+            </article>
+            {(includedItems.length > 0 || excludedItems.length > 0) && (
+              <article className="detail-card" data-reveal>
+                <p className="eyebrow">WHAT'S INCLUDED</p>
+                <h2>Travel with clarity</h2>
+                <div className="detail-columns">
+                  <div><h3>Included</h3><ul className="detail-list">{includedItems.map((item) => <li key={item}><Check size={15} />{item}</li>)}</ul></div>
+                  <div><h3>Not included</h3><ul className="detail-list">{excludedItems.map((item) => <li key={item}><Minus size={15} />{item}</li>)}</ul></div>
+                </div>
+              </article>
+            )}
+          </div>
+
+          {galleryImages.length > 0 ? <div className="detail-gallery" data-reveal>{galleryImages.map((image, index) => <img key={`${image}-${index}`} src={image} alt={`${safari.title} gallery ${index + 1}`} loading="lazy" />)}</div> : null}
+
+          {relatedSafaris.length > 0 ? <section className="detail-related"><SectionHeading number="02" eyebrow="MORE JOURNEYS" title="Safaris shaped by the same wild rhythm." /><div className="detail-related-cards">{relatedSafaris.map((item) => <article key={item.slug || item.id} className="detail-related-card" data-reveal>{item.image ? <img src={item.image} alt={item.title} loading="lazy" /> : <div className="detail-related-placeholder" aria-hidden="true" />}<div><span>{item.region}</span><h3>{item.title}</h3><button className="text-link" onClick={() => openSafari(item)}>Open safari <ArrowRight size={16} /></button></div></article>)}</div></section> : null}
         </div>
-
-        {safari.gallery.length > 0 ? <div className="detail-gallery" data-reveal>{safari.gallery.map((image, index) => <img key={`${image}-${index}`} src={image} alt={`${safari.title} gallery ${index + 1}`} loading="lazy" />)}</div> : null}
-
-        <div className="detail-grid">
-          <article className="detail-card" data-reveal>
-            <p className="eyebrow">WILDLIFE & PLACES</p>
-            <h2>Where this safari belongs</h2>
-            <div className="detail-tag-group">
-              {(safari.parks ?? []).map((park) => <span key={park}>{park}</span>)}
-              {(safari.wildlife ?? []).map((animal) => <span key={animal}>{animal}</span>)}
-            </div>
-          </article>
-          {relatedDestinations.length > 0 ? <article className="detail-card" data-reveal><p className="eyebrow">RELATED DESTINATIONS</p><h2>Continue through the landscape</h2><div className="detail-related-list">{relatedDestinations.map((destination) => <button key={destination.slug || destination.name} className="detail-related-item" onClick={() => openDestination(destination)}><span>{destination.country}</span><strong>{destination.name}</strong><ArrowRight size={16} /></button>)}</div></article> : null}
-        </div>
-
-        {relatedSafaris.length > 0 ? <section className="detail-related section-pad"><SectionHeading number="02" eyebrow="MORE JOURNEYS" title="Safaris shaped by the same wild rhythm." /><div className="detail-related-cards">{relatedSafaris.map((item) => <article key={item.slug || item.id} className="detail-related-card" data-reveal><img src={item.image} alt="" loading="lazy" /><div><span>{item.region}</span><h3>{item.title}</h3><button className="text-link" onClick={() => openSafari(item)}>Open safari <ArrowRight size={16} /></button></div></article>)}</div></section> : null}
       </section>
     </>
   );
 }
-
 function DestinationDetailPage({ slug, onBack, openSafari }: { slug: string; onBack: () => void; openSafari: (safari: Safari) => void }) {
   const destinations = useDestinations();
   const safaris = usePublishedSafaris();
@@ -1398,7 +1655,7 @@ function PublicApp() {
     pushRoute(ROUTES.destinations, { page: "destinations", safariSlug: null, destinationSlug: null, postSlug: null });
   }, [pushRoute]);
 
-  const bookSafari = useCallback((safari: Safari) => {
+  const bookSafari = useCallback((safari: Safari | null) => {
     setBookingSafari(safari);
     pushRoute(ROUTES.contact, { page: "contact", safariSlug: null, destinationSlug: null, postSlug: null });
   }, [pushRoute]);
@@ -1493,7 +1750,7 @@ function PublicApp() {
   const pageContent = useMemo(() => {
     if (page === "home") return <HomePage navigate={navigate} content={publicContent} openSafari={openSafari} onOpenPost={openPost} />;
     if (page === "about") return <AboutPage navigate={navigate} />;
-    if (page === "experiences" && safariSlug) return <SafariDetailPage slug={safariSlug} onBack={closeSafari} onBook={bookSafari} openDestination={openDestination} openSafari={openSafari} />;
+    if (page === "experiences" && safariSlug) return <SafariDetailPage slug={safariSlug} onBack={closeSafari} onBook={bookSafari} openSafari={openSafari} />;
     if (page === "experiences") return <ExperiencesPage openSafari={openSafari} onBook={bookSafari} />;
     if (page === "destinations" && destinationSlug) return <DestinationDetailPage slug={destinationSlug} onBack={closeDestination} openSafari={openSafari} />;
     if (page === "destinations") return <DestinationsPage onBook={bookSafari} openDestination={openDestination} />;

@@ -104,6 +104,10 @@ function buildPublicClient(): SupabaseClient | null {
         persistSession: false,
         autoRefreshToken: false,
         detectSessionInUrl: false,
+        // Distinct storage key so the anonymous client and the staff client
+        // never instantiate colliding GoTrueClient sessions (avoids the
+        // "Multiple GoTrueClient instances" console warning on the site).
+        storageKey: "olkinyei-public-auth-token",
       },
     });
   } catch (error) {

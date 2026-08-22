@@ -166,6 +166,9 @@ const seedActivity: ActivityEntry[] = [
 
 // ============ Store Implementation ============
 
+/** Lifecycle of the anonymous `public.packages` read, for honest UI states. */
+export type PublicReadStatus = "idle" | "loading" | "success" | "error" | "unconfigured";
+
 type StoreState = {
   theme: Theme;
   currentUserId: string | null;
@@ -175,6 +178,9 @@ type StoreState = {
   newBookingsCount: number;
   packages: SafariPackage[];
   publicPackages: SafariPackage[];
+  /** Read-path diagnostics for the safari package query (never persisted). */
+  publicPackagesStatus: PublicReadStatus;
+  publicPackagesError: string | null;
   destinations: Destination[];
   publicDestinations: Destination[];
   media: MediaAsset[];
@@ -245,6 +251,8 @@ function seedState(): StoreState {
     newBookingsCount: 0,
     packages: seedPackages,
     publicPackages: publicPackagesFromStaff(seedPackages),
+    publicPackagesStatus: "idle",
+    publicPackagesError: null,
     destinations: seedDestinations,
     publicDestinations: publicDestinationsFromStaff(seedDestinations),
     media: seedMedia,
@@ -310,6 +318,8 @@ function loadState(): StoreState {
       publicBlogPosts: [],
       publicTestimonials: [],
       publicPages: [],
+      publicPackagesStatus: "idle",
+      publicPackagesError: null,
       // Keep site defaults until cms_content loads, but publicSiteSettings
       // will be replaced immediately once the DB responds.
       theme,
@@ -318,6 +328,10 @@ function loadState(): StoreState {
     };
   }
 
+  // No cloud backend: the PUBLIC website must never fall back to demo/seed
+  // safari packages — an unconfigured production build renders an explicit,
+  // diagnosable "Supabase not configured" state instead of fake journeys.
+  // (The admin Studio keeps its demo data so the CMS remains designable.)
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
@@ -338,7 +352,9 @@ function loadState(): StoreState {
         bookings: saved.bookings ?? seedBookings,
         newBookingsCount: saved.newBookingsCount ?? 0,
         packages: staffPackages,
-        publicPackages: publicPackagesFromStaff(staffPackages),
+        publicPackages: [],
+        publicPackagesStatus: "unconfigured",
+        publicPackagesError: null,
         destinations: staffDestinations,
         publicDestinations: publicDestinationsFromStaff(staffDestinations),
         media: staffMedia,
@@ -515,7 +531,7 @@ window.addEventListener("storage", (event) => {
       state = {
         ...loadState(),
         ...saved,
-        publicPackages: publicPackagesFromStaff(saved.packages ?? state.packages),
+        publicPackages: [],
         publicDestinations: publicDestinationsFromStaff(saved.destinations ?? state.destinations),
         publicMedia: publicMediaFromStaff(saved.media ?? state.media),
         publicBlogPosts: publicBlogPostsFromStaff(saved.blogPosts ?? state.blogPosts),
@@ -523,6 +539,8 @@ window.addEventListener("storage", (event) => {
         publicGuides: publicGuidesFromStaff(saved.guides ?? state.guides),
         publicPages: saved.pages ?? state.pages,
         publicSiteSettings: saved.siteSettings ?? state.siteSettings,
+        publicPackagesStatus: "unconfigured",
+        publicPackagesError: null,
         notifications: state.notifications,
       };
       listeners.forEach((listener) => listener());
@@ -536,9 +554,11 @@ window.addEventListener("storage", (event) => {
   }
 });
 
-function persistedStateSnapshot(current: StoreState): Omit<StoreState, "publicPackages" | "publicDestinations" | "publicMedia" | "publicBlogPosts" | "publicTestimonials" | "publicGuides" | "publicPages" | "publicSiteSettings" | "notifications"> {
+function persistedStateSnapshot(current: StoreState): Omit<StoreState, "publicPackages" | "publicPackagesStatus" | "publicPackagesError" | "publicDestinations" | "publicMedia" | "publicBlogPosts" | "publicTestimonials" | "publicGuides" | "publicPages" | "publicSiteSettings" | "notifications"> {
   const {
     publicPackages: _publicPackages,
+    publicPackagesStatus: _publicPackagesStatus,
+    publicPackagesError: _publicPackagesError,
     publicDestinations: _publicDestinations,
     publicMedia: _publicMedia,
     publicBlogPosts: _publicBlogPosts,
@@ -588,7 +608,12 @@ type CmsContentRow = { id: string; content: unknown };
 function shouldLogPublicDiagnostics() {
   if (typeof window === "undefined") return import.meta.env.DEV;
   const host = window.location.hostname.toLowerCase();
-  return import.meta.env.DEV || host === "localhost" || host === "127.0.0.1" || host.endsWith(".vercel.app");
+  return import.meta.env.DEV
+    || host === "localhost"
+    || host === "127.0.0.1"
+    || host.endsWith(".vercel.app")
+    || host.endsWith(".e2b.app")
+    || host.includes("preview");
 }
 
 function logPublicReadDiagnostics(label: string, details: Record<string, unknown>) {
@@ -870,10 +895,18 @@ function applyPublicBlogRealtimeRow(action: "INSERT" | "UPDATE" | "DELETE", row:
 }
 
 // Live updates: any save from any device lands here without a refresh.
-if (typeof window !== "undefined") {
+// NOTE: this must run ONLY after every module-level `let` above and below is
+// initialized. It used to run inline mid-module, which hit the temporal dead
+// zone of the `*Bootstrapped` flags and silently rejected EVERY initial
+// Supabase load in the browser — the exact reason the public site showed no
+// safari packages. `bootstrapContentSync()` is now invoked at the very end of
+// this module (see below), where all declarations are live.
+function bootstrapContentSync(): void {
+  if (typeof window === "undefined") return;
   if (supabase) {
-    supabase
-      .channel("olkinyei-cms-content")
+    try {
+      supabase
+        .channel("olkinyei-cms-content")
       .on("postgres_changes", { event: "*", schema: "public", table: "cms_content" }, (payload) => {
         const row = payload.new as { id?: string; content?: unknown };
         if (row?.id === "site_settings") applyCloudSiteSettings(row.content);
@@ -952,6 +985,11 @@ if (typeof window !== "undefined") {
         applyMediaRealtime("DELETE", payload.old);
       })
       .subscribe();
+    } catch (error) {
+      // Realtime is an enhancement, never a dependency: REST stays the source
+      // of truth, so a websocket failure must not block the content loads.
+      if (import.meta.env.DEV) console.warn("[Olkinyei] Realtime unavailable — REST content sync remains active:", error instanceof Error ? error.message : error);
+    }
 
     void loadCloudCmsContent();
     void loadCloudBlogPosts();
@@ -965,8 +1003,9 @@ if (typeof window !== "undefined") {
   }
 
   if (supabasePublic) {
-    supabasePublic
-      .channel("olkinyei-public-content")
+    try {
+      supabasePublic
+        .channel("olkinyei-public-content")
       .on("postgres_changes", { event: "*", schema: "public", table: "cms_content" }, (payload) => {
         const row = payload.new as { id?: string; content?: unknown };
         if (row?.id === "site_settings") applyPublicCloudSiteSettings(row.content);
@@ -1027,6 +1066,10 @@ if (typeof window !== "undefined") {
         applyPublicMediaRealtime("DELETE", payload.old);
       })
       .subscribe();
+    } catch (error) {
+      // Same guarantee as above for the anonymous channel.
+      if (import.meta.env.DEV) console.warn("[Olkinyei] Public Realtime unavailable — REST content sync remains active:", error instanceof Error ? error.message : error);
+    }
 
     void loadPublicCmsContent();
     void loadPublicBlogPosts();
@@ -1036,6 +1079,46 @@ if (typeof window !== "undefined") {
     void loadPublicGuides();
     void loadPublicMedia();
   }
+}
+
+// ============ Self-healing public reads ============
+// A public CMS read can fail on first load (transient network blip, a freshly
+// applied RLS policy whose schema cache is stale, or an environment variable
+// added after the Vercel build). Without a retry the site would stay stuck on
+// an error state until a manual refresh or a Realtime event. Re-run the public
+// loaders when the tab regains focus so the existing Supabase records are
+// reconnected without a full reload and without ever touching the data.
+let publicReadRetryScheduled = false;
+
+function retryPublicReads() {
+  if (publicReadRetryScheduled || typeof window === "undefined") return;
+  publicReadRetryScheduled = true;
+  window.setTimeout(() => {
+    publicReadRetryScheduled = false;
+    if (!hasCloudBackend) return;
+    publicCmsContentBootstrapped = false;
+    publicPackagesBootstrapped = false;
+    publicDestinationsBootstrapped = false;
+    publicGuidesBootstrapped = false;
+    publicMediaBootstrapped = false;
+    publicBlogBootstrapped = false;
+    publicTestimonialsBootstrapped = false;
+    void loadPublicCmsContent();
+    void loadPublicBlogPosts();
+    void loadPublicTestimonials();
+    void loadPublicPackages();
+    void loadPublicDestinations();
+    void loadPublicGuides();
+    void loadPublicMedia();
+  }, 4000);
+}
+
+if (typeof window !== "undefined" && hasCloudBackend) {
+  window.addEventListener("focus", retryPublicReads);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") retryPublicReads();
+  });
+  void retryPublicReads();
 }
 
 export function newBlogId(): string {
@@ -1240,28 +1323,55 @@ async function loadPublicPackages(options: { force?: boolean; requireSuccess?: b
   const client = supabasePublic;
   if (!client || (publicPackagesBootstrapped && !options.force)) return;
   publicPackagesBootstrapped = true;
+  const table = "packages";
+  // The anonymous visitor only ever sees published, non-archived packages.
+  // The filter is applied explicitly here (not just via RLS) so a permissive
+  // or stale RLS policy can never leak drafts, and a broken read is obvious.
+  const filter = "published = true";
+  state = { ...state, publicPackagesStatus: "loading", publicPackagesError: null };
+  emit();
+  logPublicReadDiagnostics("SAFARIS", { phase: "request-started", table, filter });
   try {
     let orderColumn = "created_at";
-    let { data, error } = await client.from("packages").select("*").order(orderColumn, { ascending: false });
+    let { data, error } = await client.from(table).select("*").eq("published", true).order(orderColumn, { ascending: false });
     if (error && isMissingColumnError(error.message)) {
       orderColumn = "updated_at";
-      ({ data, error } = await client.from("packages").select("*").order(orderColumn, { ascending: false }));
+      ({ data, error } = await client.from(table).select("*").eq("published", true).order(orderColumn, { ascending: false }));
     }
     if (error) throw new Error(error.message);
     const rows = (data as DbPackageRow[] | null) ?? [];
-    state = { ...state, publicPackages: rows.map(packageFromRow) };
+    state = { ...state, publicPackages: rows.map(packageFromRow), publicPackagesStatus: "success", publicPackagesError: null };
     emit();
     logPublicReadDiagnostics("SAFARIS", {
-      table: "packages",
-      query: `select * order by ${orderColumn} desc`,
+      phase: "request-succeeded",
+      table,
+      query: `select * where ${filter} order by ${orderColumn} desc`,
+      filter,
       recordCount: rows.length,
-      sample: rows.slice(0, 3).map((row) => ({ id: row.id, slug: row.slug, title: row.title, published: row.published, archived: row.archived })),
+      packages: rows.map((row) => ({ id: row.id, slug: row.slug, title: row.title, published: row.published, archived: row.archived })),
     });
   } catch (error) {
     publicPackagesBootstrapped = false;
-    logPublicReadError("SAFARIS", error, { table: "packages", filter: "anon published content via RLS" });
+    const message = error instanceof Error ? error.message : String(error);
+    state = { ...state, publicPackagesStatus: "error", publicPackagesError: message };
+    emit();
+    logPublicReadError("SAFARIS", error, {
+      table,
+      filter,
+      hint: "Run supabase/public_read_restore.sql, then confirm the Vercel build has VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY for the same Supabase project the CMS writes to.",
+    });
     if (options.requireSuccess) throw error;
   }
+}
+
+/**
+ * Public retry entry point: re-reads the published safari packages from
+ * Supabase. Used by the retry button on the public error state and by the
+ * self-healing focus/visibility listener below.
+ */
+async function refreshPublicPackages(): Promise<void> {
+  publicPackagesBootstrapped = false;
+  await loadPublicPackages({ force: true });
 }
 
 function applyPackageRealtime(action: "INSERT" | "UPDATE" | "DELETE", row: unknown) {
@@ -1284,15 +1394,26 @@ function applyPackageRealtime(action: "INSERT" | "UPDATE" | "DELETE", row: unkno
 function applyPublicPackageRealtime(action: "INSERT" | "UPDATE" | "DELETE", row: unknown) {
   if (!row || typeof row !== "object") return;
   const rec = row as DbPackageRow;
+  // A live row arriving proves the public read path is connected.
+  const connected: Partial<StoreState> = state.publicPackagesStatus === "error"
+    ? { publicPackagesStatus: "success" as const, publicPackagesError: null }
+    : {};
   if (action === "DELETE") {
-    state = { ...state, publicPackages: state.publicPackages.filter((p) => p.id !== rec.id) };
+    state = { ...state, ...connected, publicPackages: state.publicPackages.filter((p) => p.id !== rec.id) };
     emit();
     return;
   }
   const next = packageFromRow(rec);
+  // Never let a draft/archived row enter the public list via Realtime.
+  if (!next.published || next.archived) {
+    state = { ...state, ...connected, publicPackages: state.publicPackages.filter((p) => p.id !== next.id) };
+    emit();
+    return;
+  }
   const exists = state.publicPackages.some((p) => p.id === next.id);
   state = {
     ...state,
+    ...connected,
     publicPackages: exists ? state.publicPackages.map((p) => (p.id === next.id ? next : p)) : [next, ...state.publicPackages],
   };
   emit();
@@ -3699,4 +3820,18 @@ function isShallowEqualValue(a: unknown, b: unknown): boolean {
   return false;
 }
 
-export const store = { actions, getState, currentUser, currentRole, notify, dismissNotification };
+export const store = {
+  actions,
+  getState,
+  currentUser,
+  currentRole,
+  notify,
+  dismissNotification,
+  /** Re-reads published safari packages from Supabase (public retry button). */
+  refreshPublicPackages,
+};
+
+// Bootstrap AFTER every module-level declaration above is initialized —
+// calling the content loaders any earlier re-triggers the temporal-dead-zone
+// failure that kept the public site from ever loading its first package read.
+bootstrapContentSync();
