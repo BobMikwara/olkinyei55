@@ -234,9 +234,42 @@ const packages = [
   },
 ];
 
-const EMPTY_TABLES = ["cms_content", "blog_posts", "testimonials", "destinations", "guides", "media_assets", "vehicles", "customers", "bookings"];
+// --- CMS documents as they exist in Supabase (public.cms_content) ---
+const siteSettings = {
+  brandName: "Olkinyei Expeditions",
+  tagline: "East Africa, unhurried.",
+  logo: "/logo.svg",
+  darkLogo: "/logo.svg",
+  favicon: "/logo.svg",
+  primaryColor: "#B9552D",
+  accentColor: "#D9B77B",
+  textColor: "#151713",
+  backgroundColor: "#F3ECDF",
+  serifFont: "Cormorant Garamond",
+  sansFont: "Manrope",
+  contactEmail: "journeys@olkinyei.com",
+  reservationsEmail: "reservations@olkinyei.com",
+  phone: "+254 700 428 181",
+  whatsapp: "+254 700 428 181",
+  addresses: [{ city: "Nairobi", address: "Marula Lane, Karen" }, { city: "Arusha", address: "Sakina Road" }],
+  social: [{ platform: "Instagram", url: "https://instagram.com/olkinyeiexpeditions" }],
+  analytics: { ga4: "G-XXXXXXXXXX", gtm: "GTM-XXXXXXX", fbPixel: "FB-XXXXXXXX", clarity: "CL-XXXXXXXX" },
+  maintenanceMode: true,
+  comingSoon: false,
+  robotsTxt: "User-agent: *\nAllow: /\n",
+  customCss: "",
+  customJs: "",
+};
+
+const cmsContent = {
+  site_settings: { id: "site_settings", content: { ...siteSettings }, updated_at: now },
+  pages: { id: "pages", content: [], updated_at: now },
+};
+
+const EMPTY_TABLES = ["blog_posts", "testimonials", "destinations", "guides", "media_assets", "vehicles", "customers", "bookings"];
 
 let failPackages = false;
+let failCms = false;
 const requests = [];
 
 function sortRows(rows, orderParam) {
@@ -268,6 +301,25 @@ function filterRows(rows, params) {
   return out;
 }
 
+function readRequestBody(req) {
+  return new Promise((resolve, reject) => {
+    let body = "";
+    req.on("data", (chunk) => { body += chunk; });
+    req.on("end", () => {
+      try {
+        resolve(body ? JSON.parse(body) : null);
+      } catch (error) {
+        reject(error);
+      }
+    });
+    req.on("error", reject);
+  });
+}
+
+function wantsObjectResponse(req) {
+  return String(req.headers.accept || "").includes("application/vnd.pgrst.object+json");
+}
+
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, `http://127.0.0.1:${PORT}`);
   const path = url.pathname;
@@ -286,8 +338,9 @@ const server = http.createServer((req, res) => {
       try {
         const control = JSON.parse(body || "{}");
         if (typeof control.failPackages === "boolean") failPackages = control.failPackages;
+        if (typeof control.failCms === "boolean") failCms = control.failCms;
         res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ ok: true, failPackages }));
+        res.end(JSON.stringify({ ok: true, failPackages, failCms }));
       } catch {
         res.writeHead(400); res.end();
       }
@@ -298,6 +351,7 @@ const server = http.createServer((req, res) => {
   if (req.method === "POST" && path === "/__reset") {
     requests.length = 0;
     failPackages = false;
+    failCms = false;
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ ok: true }));
     return;
@@ -312,6 +366,60 @@ const server = http.createServer((req, res) => {
   if (path.startsWith("/rest/v1/")) {
     const table = path.replace("/rest/v1/", "").split("?")[0];
     requests.push({ method: req.method, table, query: Object.fromEntries(params) });
+
+    if (table === "cms_content") {
+      if (failCms) {
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ code: "42501", message: "permission denied for table cms_content", hint: "RLS policy rejected the CMS write", details: null }));
+        return;
+      }
+      if (req.method === "GET") {
+        let rows = Object.values(cmsContent);
+        if (params.has("id") && params.get("id")?.startsWith("eq.")) {
+          rows = rows.filter((row) => row.id === params.get("id").slice(3));
+        }
+        rows = sortRows(rows, params.get("order"));
+        if (rows.length) {
+          if (wantsObjectResponse(req)) {
+            res.writeHead(200, { "Content-Type": "application/vnd.pgrst.object+json" });
+            res.end(JSON.stringify(rows[0]));
+          } else {
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(JSON.stringify(rows));
+          }
+        } else {
+          res.writeHead(wantsObjectResponse(req) ? 406 : 200, { "Content-Type": "application/json" });
+          res.end(wantsObjectResponse(req) ? "" : "[]");
+        }
+        return;
+      }
+      if (req.method === "POST") {
+        void readRequestBody(req).then((payload) => {
+          const row = Array.isArray(payload) ? payload[0] : payload;
+          if (!row || typeof row.id !== "string" || !("content" in row)) {
+            res.writeHead(400, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ message: "cms_content upsert requires id + content" }));
+            return;
+          }
+          const saved = { ...(cmsContent[row.id] ?? {}), ...row, updated_at: new Date().toISOString() };
+          cmsContent[row.id] = saved;
+          if (wantsObjectResponse(req)) {
+            res.writeHead(200, { "Content-Type": "application/vnd.pgrst.object+json" });
+            res.end(JSON.stringify({ id: saved.id }));
+          } else {
+            res.writeHead(201, { "Content-Type": "application/json" });
+            res.end(JSON.stringify([{ id: saved.id }]));
+          }
+        }).catch(() => {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ message: "Invalid request body" }));
+        });
+        return;
+      }
+      res.writeHead(404, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ message: `Unsupported cms_content method ${req.method}` }));
+      return;
+    }
 
     if (table === "packages" && failPackages) {
       // Realistic RLS-denied response, exactly what a broken policy returns.

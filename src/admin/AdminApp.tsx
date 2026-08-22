@@ -86,11 +86,17 @@ function BrandPreview({ settings }: { settings: SiteSettings }) {
   return <div className="overflow-hidden rounded-xl border border-[var(--admin-border)]"><div className="flex min-h-64 items-center justify-center bg-[#20251e] p-8 text-[#f3ecdf]">{settings.logo ? <img src={settings.logo} alt="Current site logo" className="max-h-28 max-w-[280px] object-contain" /> : <div className="text-center"><strong className="block font-serif text-4xl font-normal">{settings.brandName}</strong><span className="mt-2 block text-[10px] tracking-[.4em]">EXPEDITIONS</span></div>}</div><div className="bg-[var(--admin-surface-2)] px-4 py-3 text-[11px] text-[var(--admin-fg-muted)]">Public header and footer preview</div></div>;
 }
 
-function SettingsManager() {
+function settingsEqual(a: SiteSettings, b: SiteSettings): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+export function SettingsManager() {
   const saved = useStore((state) => state.siteSettings);
   const [form, setForm] = useState<SiteSettings>(() => structuredClone(saved));
+  const [dirty, setDirty] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [tab, setTab] = useState<"brand" | "contact" | "analytics" | "advanced">("brand");
-  const update = <K extends keyof SiteSettings>(key: K, value: SiteSettings[K]) => setForm((current) => ({ ...current, [key]: value }));
+  const update = <K extends keyof SiteSettings>(key: K, value: SiteSettings[K]) => { setDirty(true); setForm((current) => ({ ...current, [key]: value })); };
   const uploadLogo = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -100,9 +106,30 @@ function SettingsManager() {
     reader.onload = () => update("logo", String(reader.result));
     reader.readAsDataURL(file);
   };
-  const save = () => store.actions.updateSiteSettings(form);
+  const save = async () => {
+    setSaving(true);
+    try {
+      const ok = await store.actions.updateSiteSettings(form);
+      if (ok) setDirty(false);
+    } finally {
+      setSaving(false);
+    }
+  };
+  // The cloud settings document loads asynchronously after this screen mounts
+  // (and after a refresh). Keep the form in sync with the persisted value ONLY
+  // when the admin has not started editing — otherwise a late DB response
+  // would silently discard in-progress changes.
+  useEffect(() => {
+    // `dirty` is intentionally captured without being a dependency: this effect
+    // only needs to react to a persisted settings change. Running it on every
+    // keystroke would JSON.stringify the (possibly large) robots/logo values
+    // for no benefit.
+    setForm((current) => settingsEqual(current, saved)
+      ? current
+      : (dirty ? current : structuredClone(saved)));
+  }, [saved]);
   return <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
-    <PageHeader eyebrow="Global configuration" title="Site settings" description="Manage the identity and operating details shared by the public website." actions={<><Button variant="outline" icon={Eye} onClick={() => { window.location.hash = ""; window.location.reload(); }}>Preview</Button><Button icon={Save} onClick={save}>Save changes</Button></>} />
+    <PageHeader eyebrow="Global configuration" title="Site settings" description="Manage the identity and operating details shared by the public website." actions={<><Button variant="outline" icon={Eye} onClick={() => { window.location.hash = ""; window.location.reload(); }}>Preview</Button><Button icon={Save} onClick={save} loading={saving} disabled={saving}>{saving ? "Saving…" : "Save changes"}</Button></>} />
     <div className="mb-6 flex gap-1 border-b border-[var(--admin-border)]">{(["brand", "contact", "analytics", "advanced"] as const).map((item) => <button key={item} onClick={() => setTab(item)} className={`relative px-4 py-3 text-xs capitalize ${tab === item ? "text-[var(--admin-fg)]" : "text-[var(--admin-fg-muted)]"}`}>{item}{tab === item && <motion.span layoutId="settings-tab" className="absolute inset-x-0 bottom-0 h-px bg-[var(--admin-accent)]" />}</button>)}</div>
     {tab === "brand" && <div className="grid gap-6 lg:grid-cols-[1fr_.85fr]"><Card className="p-6"><h2 className="font-serif text-2xl font-light">Brand identity</h2><p className="mt-1 text-xs text-[var(--admin-fg-muted)]">Changes publish to the website header, menu, footer and browser identity.</p><div className="mt-6 space-y-5"><label className="block"><span className="mb-2 block text-[11px] font-medium uppercase tracking-wider text-[var(--admin-fg-muted)]">Website name</span><Input value={form.brandName} onChange={(event) => update("brandName", event.target.value)} /></label><label className="block"><span className="mb-2 block text-[11px] font-medium uppercase tracking-wider text-[var(--admin-fg-muted)]">Tagline</span><Input value={form.tagline} onChange={(event) => update("tagline", event.target.value)} /></label><div><span className="mb-2 block text-[11px] font-medium uppercase tracking-wider text-[var(--admin-fg-muted)]">Primary site logo</span><div className="grid gap-2 sm:grid-cols-[1fr_auto]"><Input value={form.logo} onChange={(event) => update("logo", event.target.value)} placeholder="https://... or /logo.svg" /><label className="olk-button inline-flex h-9 cursor-pointer items-center justify-center gap-2 rounded-md bg-[var(--admin-surface-2)] px-3.5 text-xs font-medium transition hover:bg-[var(--admin-surface-3)]"><Upload size={14} />Upload<input className="sr-only" type="file" accept="image/svg+xml,image/png,image/jpeg,image/webp" onChange={uploadLogo} /></label></div><p className="mt-2 text-[11px] text-[var(--admin-fg-muted)]">Upload SVG, PNG, JPG or WebP, or paste a hosted image URL. Click Save changes to publish.</p></div><div className="grid gap-4 sm:grid-cols-2"><label><span className="mb-2 block text-[11px] font-medium uppercase tracking-wider text-[var(--admin-fg-muted)]">Primary color</span><div className="flex gap-2"><input type="color" className="h-9 w-12 rounded border border-[var(--admin-border)] bg-transparent" value={form.primaryColor} onChange={(event) => update("primaryColor", event.target.value)} /><Input value={form.primaryColor} onChange={(event) => update("primaryColor", event.target.value)} /></div></label><label><span className="mb-2 block text-[11px] font-medium uppercase tracking-wider text-[var(--admin-fg-muted)]">Accent color</span><div className="flex gap-2"><input type="color" className="h-9 w-12 rounded border border-[var(--admin-border)] bg-transparent" value={form.accentColor} onChange={(event) => update("accentColor", event.target.value)} /><Input value={form.accentColor} onChange={(event) => update("accentColor", event.target.value)} /></div></label></div></div></Card><BrandPreview settings={form} /></div>}
     {tab === "contact" && <Card className="max-w-3xl p-6"><h2 className="font-serif text-2xl font-light">Contact details</h2><div className="mt-6 grid gap-5 sm:grid-cols-2"><label><span className="mb-2 block text-[11px] uppercase tracking-wider text-[var(--admin-fg-muted)]">Journey email</span><Input type="email" value={form.contactEmail} onChange={(event) => update("contactEmail", event.target.value)} /></label><label><span className="mb-2 block text-[11px] uppercase tracking-wider text-[var(--admin-fg-muted)]">Reservations email</span><Input type="email" value={form.reservationsEmail} onChange={(event) => update("reservationsEmail", event.target.value)} /></label><label><span className="mb-2 block text-[11px] uppercase tracking-wider text-[var(--admin-fg-muted)]">Phone</span><Input value={form.phone} onChange={(event) => update("phone", event.target.value)} /></label><label><span className="mb-2 block text-[11px] uppercase tracking-wider text-[var(--admin-fg-muted)]">WhatsApp</span><Input value={form.whatsapp} onChange={(event) => update("whatsapp", event.target.value)} /></label></div></Card>}

@@ -627,11 +627,30 @@ function logPublicReadError(label: string, error: unknown, details: Record<strin
   console.error(`[PUBLIC ${label}] Query failed: ${message}`, details);
 }
 
+/**
+ * Merges a `cms_content` site-settings document into a base settings object.
+ *
+ * The database document is JSONB and older/partial documents may omit nested
+ * fields (e.g. `analytics.clarity`, `analytics.fbPixel`, or arrays). A shallow
+ * spread would silently drop those defaults, so the known nested objects are
+ * merged deliberately. Arrays are treated as opaque values (whole objects), so
+ * a saved `addresses`/`social` list is never half-overwritten.
+ */
+function mergeSiteSettings(base: SiteSettings, incoming: Partial<SiteSettings>): SiteSettings {
+  return {
+    ...base,
+    ...incoming,
+    analytics: { ...base.analytics, ...(incoming.analytics ?? {}) },
+    addresses: Array.isArray(incoming.addresses) ? incoming.addresses : base.addresses,
+    social: Array.isArray(incoming.social) ? incoming.social : base.social,
+  };
+}
+
 function applyCloudSiteSettings(content: unknown) {
   if (!content || typeof content !== "object" || Array.isArray(content)) return;
   const incoming = content as Partial<SiteSettings>;
   if (Object.keys(incoming).length === 0) return;
-  state = { ...state, siteSettings: { ...state.siteSettings, ...incoming } };
+  state = { ...state, siteSettings: mergeSiteSettings(state.siteSettings, incoming) };
   emit();
 }
 
@@ -639,7 +658,7 @@ function applyPublicCloudSiteSettings(content: unknown) {
   if (!content || typeof content !== "object" || Array.isArray(content)) return;
   const incoming = content as Partial<SiteSettings>;
   if (Object.keys(incoming).length === 0) return;
-  state = { ...state, publicSiteSettings: { ...seedSiteSettings, ...incoming } };
+  state = { ...state, publicSiteSettings: mergeSiteSettings(seedSiteSettings, incoming) };
   emit();
 }
 
@@ -667,8 +686,13 @@ async function loadCloudCmsContent(options: { force?: boolean } = {}): Promise<v
       if (row.id === "pages") applyCloudPages(row.content);
     }
     if (import.meta.env.DEV) console.debug("[Olkinyei] CMS content synced from Supabase (staff)");
-  } catch {
+  } catch (error) {
     cmsContentBootstrapped = false; // allow retry on next focus/save
+    console.error(
+      "[Olkinyei] Could not load CMS content (site settings/pages) from Supabase:",
+      error instanceof Error ? error.message : error,
+      "Check that supabase/cms_content.sql has run and that authenticated staff can SELECT public.cms_content.",
+    );
   }
 }
 
@@ -683,7 +707,7 @@ async function loadPublicCmsContent(options: { force?: boolean; requireSuccess?:
     let nextPages = seedPages;
     for (const row of rows) {
       if (row.id === "site_settings" && row.content && typeof row.content === "object" && !Array.isArray(row.content)) {
-        nextSiteSettings = { ...seedSiteSettings, ...(row.content as Partial<SiteSettings>) };
+        nextSiteSettings = mergeSiteSettings(seedSiteSettings, row.content as Partial<SiteSettings>);
       }
       if (row.id === "pages" && Array.isArray(row.content) && row.content.length > 0) {
         nextPages = row.content as PageSettings[];
@@ -694,6 +718,10 @@ async function loadPublicCmsContent(options: { force?: boolean; requireSuccess?:
     if (import.meta.env.DEV) console.debug("[Olkinyei] CMS content synced from Supabase (public)");
   } catch (error) {
     publicCmsContentBootstrapped = false;
+    logPublicReadError("CMS CONTENT", error, {
+      table: TABLES.cmsContent,
+      hint: "Check that supabase/cms_content.sql has run and that anon SELECT is permitted on public.cms_content.",
+    });
     if (options.requireSuccess) throw error;
   }
 }
@@ -707,16 +735,35 @@ async function cloudSaveDocument(id: "site_settings" | "pages", content: unknown
     publicCmsContentBootstrapped = false;
     return;
   }
-  cloudSaveQueue = cloudSaveQueue.then(async () => {
-    const { error } = await client
-      .from(TABLES.cmsContent)
-      .upsert({ id, content, updated_at: new Date().toISOString() })
-      .select("id")
-      .single();
-    if (error) throw error;
-    await loadPublicCmsContent({ force: true, requireSuccess: true });
-  });
-  return cloudSaveQueue;
+  // Serialise writes so two rapid saves cannot race, but make the queue
+  // self-healing: a rejected save must never poison the next save (otherwise
+  // one RLS/network failure would silently disable every later settings/page
+  // save until a full reload).
+  const job = cloudSaveQueue
+    .catch(() => undefined)
+    .then(async () => {
+      const { error } = await client
+        .from(TABLES.cmsContent)
+        .upsert({ id, content, updated_at: new Date().toISOString() })
+        .select("id")
+        .single();
+      if (error) throw error;
+      // The database write is the source of truth. If the immediate public
+      // refresh fails (transient network/RLS cache), the save still succeeded;
+      // Realtime + the next page load will converge. Report it, don't reject it.
+      try {
+        await loadPublicCmsContent({ force: true, requireSuccess: true });
+      } catch (refreshError) {
+        if (import.meta.env.DEV) {
+          console.warn(
+            "[Olkinyei] cms_content saved, but public refresh of the saved value failed:",
+            refreshError instanceof Error ? refreshError.message : refreshError,
+          );
+        }
+      }
+    });
+  cloudSaveQueue = job;
+  return job;
 }
 
 // ============ Blog post schema mapping (CMS ⇆ Supabase blog_posts) ============
@@ -3749,13 +3796,33 @@ const actions = {
   },
 
   // Site Settings — logo, brand colors, tagline, contact info, analytics.
-  updateSiteSettings(patch: Partial<SiteSettings>) {
-    state = { ...state, siteSettings: { ...state.siteSettings, ...patch } };
+  async updateSiteSettings(patch: Partial<SiteSettings>): Promise<boolean> {
+    const actor = currentUser();
+    if (!actor || !can(actor, "settings", "manage")) {
+      notify({ type: "error", title: "Settings save failed", message: "You do not have permission to manage site settings." });
+      return false;
+    }
+    const previous = state.siteSettings;
+    // Merge nested structures rather than shallow-replacing them, so a partial
+    // `analytics`/`addresses`/`social` patch from a caller can never erase the
+    // other persisted analytics tokens or configuration.
+    state = { ...state, siteSettings: mergeSiteSettings(state.siteSettings, patch) };
     logActivity("updated", "Site Settings", "global", "Global site settings");
     emit();
-    void cloudSaveDocument("site_settings", state.siteSettings)
-      .then(() => notify({ type: "success", title: "Settings saved", message: "Global site settings updated on all devices." }))
-      .catch((error) => notify({ type: "error", title: "Settings save failed", message: error instanceof Error ? error.message : "Could not publish site settings." }));
+    try {
+      await cloudSaveDocument("site_settings", state.siteSettings);
+      notify({ type: "success", title: "Settings saved", message: "Global site settings updated on all devices." });
+      return true;
+    } catch (error) {
+      // The database is the source of truth. If the write was rejected, do not
+      // leave the CMS showing a value that was never persisted.
+      state = { ...state, siteSettings: previous };
+      emit();
+      const message = error instanceof Error ? error.message : "Could not publish site settings.";
+      console.error("[Olkinyei] Site settings save failed:", message);
+      notify({ type: "error", title: "Settings save failed", message });
+      return false;
+    }
   },
 
   resetDemoData() {
