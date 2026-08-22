@@ -663,7 +663,7 @@ export function ExperiencesPage({ openSafari, onBook }: { openSafari: (safari: S
       </>
     );
   }
-  if (readStatus === "loading" && liveSafaris.length === 0) {
+  if ((readStatus === "loading" || readStatus === "idle") && liveSafaris.length === 0) {
     return (
       <>
         <PageHero page="experiences" eyebrow="PRIVATE SAFARIS" title="Journeys measured in moments." text="Eight signature routes, each privately guided and shaped around your pace." image={imagery.cheetah} />
