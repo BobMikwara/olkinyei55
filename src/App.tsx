@@ -700,6 +700,150 @@ function matchesDestination(safari: Safari, destination: Destination) {
     || Boolean(safari.country?.includes(destination.country));
 }
 
+// ============ Safari route map ============
+// A minimal, elegant route visual built entirely from the selected package's
+// own itinerary data (parks / region / country). It never introduces a second
+// data source — it only reads the existing CMS package and destination records
+// to resolve coordinates, so every package draws its own route.
+type RouteStop = { name: string; point: [number, number]; country?: string };
+
+// Coordinates for a few well-known East African locations that are referenced
+// by packages but may not yet be published destinations. This is map geometry
+// only — it does not add, replace or duplicate any package data.
+const ROUTE_COORDS: Record<string, [number, number]> = {
+  laikipia: [42, 30],
+  ndutu: [43, 52],
+  zanzibar: [62, 88],
+  eyasi: [51, 76],
+};
+
+function routeKey(name: string) {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+function stopCountry(name: string, country?: string): string | undefined {
+  if (country) return country;
+  const location = name.toLowerCase();
+  if (location.includes("mara") || location.includes("laikipia") || location.includes("amboseli") || location.includes("tsavo") || location.includes("kenya")) return "Kenya";
+  if (location.includes("serengeti") || location.includes("ngorongoro") || location.includes("tarangire") || location.includes("manyara") || location.includes("zanzibar") || location.includes("ndutu") || location.includes("eyasi") || location.includes("kilimanjaro") || location.includes("tanzania")) return "Tanzania";
+  return undefined;
+}
+
+function isZeroPoint(point: [number, number]) {
+  return point[0] === 0 && point[1] === 0;
+}
+
+function buildSafariRoute(safari: Safari, destinations: Destination[]): RouteStop[] {
+  let names = (safari.parks ?? []).filter(Boolean);
+  if (names.length === 0 && safari.region) {
+    names = safari.region.split(/\s*(?:\+|\/|,|&)\s*/).filter(Boolean);
+  }
+  const stops: RouteStop[] = [];
+  const seen = new Set<string>();
+  for (const raw of names) {
+    const name = raw.trim();
+    if (!name) continue;
+    const key = routeKey(name);
+    const dest = destinations.find((d) => routeKey(d.name) === key)
+      ?? destinations.find((d) => d.name.toLowerCase().includes(name.toLowerCase()) || name.toLowerCase().includes(d.name.toLowerCase()));
+    let point: [number, number] | undefined = dest?.coordinates ?? ROUTE_COORDS[key] ?? safari.coordinates;
+    if (!point || isZeroPoint(point)) continue;
+    const pointKey = `${point[0]}-${point[1]}`;
+    if (seen.has(pointKey)) continue;
+    seen.add(pointKey);
+    stops.push({ name, point, country: dest?.country });
+  }
+  if (stops.length === 0) {
+    const fallback: [number, number] = safari.coordinates && !isZeroPoint(safari.coordinates) ? safari.coordinates : [50, 50];
+    stops.push({ name: safari.region || safari.title, point: fallback });
+  }
+  return stops;
+}
+
+// Catmull-Rom to cubic bezier, producing a single flowing path through the stops.
+function smoothRoutePath(points: [number, number][]): string {
+  if (points.length < 2) return "";
+  let d = `M ${points[0][0]} ${points[0][1]}`;
+  for (let i = 0; i < points.length - 1; i += 1) {
+    const p0 = points[i - 1] ?? points[i];
+    const p1 = points[i];
+    const p2 = points[i + 1];
+    const p3 = points[i + 2] ?? p2;
+    const c1x = p1[0] + (p2[0] - p0[0]) / 6;
+    const c1y = p1[1] + (p2[1] - p0[1]) / 6;
+    const c2x = p2[0] - (p3[0] - p1[0]) / 6;
+    const c2y = p2[1] - (p3[1] - p1[1]) / 6;
+    d += ` C ${c1x} ${c1y}, ${c2x} ${c2y}, ${p2[0]} ${p2[1]}`;
+  }
+  return d;
+}
+
+function SafariRouteMap({ safari }: { safari: Safari }) {
+  const destinations = useDestinations();
+  const stops = useMemo(() => buildSafariRoute(safari, destinations), [safari, destinations]);
+  if (stops.length === 0) return null;
+
+  // Normalise the package's own destination coordinates into a fixed 0–100 box
+  // so the route consistently fills the map card while keeping its shape.
+  const pad = 6;
+  const xs = stops.map((stop) => stop.point[0]);
+  const ys = stops.map((stop) => stop.point[1]);
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
+  const rangeX = maxX - minX || 1;
+  const rangeY = maxY - minY || 1;
+  const normalised: [number, number][] = stops.length === 1
+    ? [[50, 50]]
+    : stops.map((stop) => [
+      pad + (stop.point[0] - minX) / rangeX * (100 - 2 * pad),
+      pad + (stop.point[1] - minY) / rangeY * (100 - 2 * pad),
+    ]);
+  const path = smoothRoutePath(normalised);
+  const stopListId = `route-stops-${routeKey(safari.title)}`;
+
+  return (
+    <section className="route-section" data-reveal>
+      <div className="route-head">
+        <p className="eyebrow">THE ROUTE</p>
+        <h2>Where this journey takes you.</h2>
+        <p className="route-sub">The places your expedition moves through, in order.</p>
+      </div>
+      <figure className="safari-route-map">
+        <div className="safari-route-map-main">
+          <svg viewBox="0 0 100 100" role="img" aria-labelledby={`route-title-${routeKey(safari.title)} ${stopListId}`}>
+            <title id={`route-title-${routeKey(safari.title)}`}>Route map for {safari.title}</title>
+            {path && <path className="route-line-glow" d={path} />}
+            {path && <path className="route-line" d={path} />}
+            {stops.map((stop, index) => (
+              <g key={`${stop.name}-${index}`} className="route-stop" transform={`translate(${normalised[index][0]} ${normalised[index][1]})`}>
+                <circle className="route-mark" r="2.7" />
+                <circle className="route-mark-inner" r="1.05" />
+                <text className="route-num" x="0" y="-3.4">{index + 1}</text>
+                <text className="route-name" x="0" y="4.8">{stop.name}</text>
+              </g>
+            ))}
+            {stops.some((stop) => stopCountry(stop.name, stop.country) === "Kenya") && <text className="route-region" x="82" y="15">KENYA</text>}
+            {stops.some((stop) => stopCountry(stop.name, stop.country) === "Tanzania") && <text className="route-region route-region--tz" x="20" y="90">TANZANIA</text>}
+          </svg>
+        </div>
+        <figcaption className="route-stops" id={stopListId}>
+          <p className="route-stops-title">Expedition route</p>
+          <ol>
+            {stops.map((stop, index) => (
+              <li key={`${stop.name}-${index}`}>
+                <em>{String(index + 1).padStart(2, "0")}</em>
+                <strong>{stop.name}</strong>
+              </li>
+            ))}
+          </ol>
+        </figcaption>
+      </figure>
+    </section>
+  );
+}
+
 function SafariDetailPage({ slug, onBack, onBook, openDestination, openSafari }: { slug: string; onBack: () => void; onBook: (safari: Safari) => void; openDestination: (destination: Destination) => void; openSafari: (safari: Safari) => void }) {
   const safaris = usePublishedSafaris();
   const destinationList = useDestinations();
@@ -716,51 +860,56 @@ function SafariDetailPage({ slug, onBack, onBook, openDestination, openSafari }:
   return (
     <>
       <section className="detail-hero">
-        <img src={safari.image} alt={`${safari.title} hero`} className="detail-hero-image" />
-        <div className="page-hero-wash" />
+        <img src={safari.image} alt={`${safari.title} hero`} className="detail-hero-image" fetchPriority="high" />
+        <div className="detail-hero-wash" />
         <div className="detail-hero-copy">
           <button className="text-link detail-back" onClick={onBack}><ArrowLeft size={15} /> All safaris</button>
           <p className="eyebrow">{safari.region}</p>
           <h1 className="split-reveal">{safari.title}</h1>
-          <p>{safari.description || safari.summary}</p>
-          <div className="detail-meta"><span><Clock3 size={15} />{safari.duration}</span><span><CircleDollarSign size={15} />From {formatCurrency(safari.price)} per person</span><span><CalendarDays size={15} />{safari.availability.join(" / ") || "Year-round"}</span></div>
+          <p className="detail-hero-text">{safari.description || safari.summary}</p>
+          <div className="detail-meta"><span><Clock3 size={15} />{safari.duration}</span><span><CircleDollarSign size={15} />From {formatCurrency(safari.price)} pp</span><span><CalendarDays size={15} />{safari.availability.join(" / ") || "Year-round"}</span></div>
           <div className="detail-cta-row"><MagneticButton className="button button--sand" onClick={() => onBook(safari)}>Book this safari <ArrowRight size={17} /></MagneticButton></div>
         </div>
       </section>
 
-      <section className="detail-shell section-pad">
-        <div className="detail-grid">
-          <article className="detail-card" data-reveal>
-            <p className="eyebrow">OVERVIEW</p>
-            <h2>Journey highlights</h2>
-            <p>{safari.summary}</p>
-            {safari.highlights && safari.highlights.length > 0 ? <ul className="detail-list">{safari.highlights.map((item) => <li key={item}><Check size={15} />{item}</li>)}</ul> : null}
-          </article>
-          <article className="detail-card" data-reveal>
-            <p className="eyebrow">WHAT'S INCLUDED</p>
-            <h2>Travel with clarity</h2>
-            <div className="detail-columns">
-              <div><h3>Included</h3><ul className="detail-list">{safari.included.map((item) => <li key={item}><Check size={15} />{item}</li>)}</ul></div>
-              <div><h3>Not included</h3><ul className="detail-list">{safari.excluded.map((item) => <li key={item}><Minus size={15} />{item}</li>)}</ul></div>
-            </div>
-          </article>
+      <section className="detail-shell">
+        <div className="detail-shell-inner">
+          <SafariRouteMap safari={safari} />
+
+          <div className="detail-grid">
+            <article className="detail-card" data-reveal>
+              <p className="eyebrow">OVERVIEW</p>
+              <h2>Journey highlights</h2>
+              <p className="detail-card-copy">{safari.summary}</p>
+              {safari.signature ? <p className="detail-signature">{safari.signature}</p> : null}
+              {safari.highlights && safari.highlights.length > 0 ? <ul className="detail-list">{safari.highlights.map((item) => <li key={item}><Check size={15} />{item}</li>)}</ul> : null}
+            </article>
+            <article className="detail-card" data-reveal>
+              <p className="eyebrow">WHAT'S INCLUDED</p>
+              <h2>Travel with clarity</h2>
+              <div className="detail-columns">
+                <div><h3>Included</h3><ul className="detail-list">{safari.included.map((item) => <li key={item}><Check size={15} />{item}</li>)}</ul></div>
+                <div><h3>Not included</h3><ul className="detail-list">{safari.excluded.map((item) => <li key={item}><Minus size={15} />{item}</li>)}</ul></div>
+              </div>
+            </article>
+          </div>
+
+          {safari.gallery.length > 0 ? <div className="detail-gallery" data-reveal>{safari.gallery.map((image, index) => <img key={`${image}-${index}`} src={image} alt={`${safari.title} gallery ${index + 1}`} loading="lazy" />)}</div> : null}
+
+          <div className="detail-grid">
+            <article className="detail-card" data-reveal>
+              <p className="eyebrow">WILDLIFE & PLACES</p>
+              <h2>Where this safari belongs</h2>
+              <div className="detail-tag-group">
+                {(safari.parks ?? []).map((park) => <span key={park}>{park}</span>)}
+                {(safari.wildlife ?? []).map((animal) => <span key={animal}>{animal}</span>)}
+              </div>
+            </article>
+            {relatedDestinations.length > 0 ? <article className="detail-card" data-reveal><p className="eyebrow">RELATED DESTINATIONS</p><h2>Continue through the landscape</h2><div className="detail-related-list">{relatedDestinations.map((destination) => <button key={destination.slug || destination.name} className="detail-related-item" onClick={() => openDestination(destination)}><span>{destination.country}</span><strong>{destination.name}</strong><ArrowRight size={16} /></button>)}</div></article> : null}
+          </div>
         </div>
 
-        {safari.gallery.length > 0 ? <div className="detail-gallery" data-reveal>{safari.gallery.map((image, index) => <img key={`${image}-${index}`} src={image} alt={`${safari.title} gallery ${index + 1}`} loading="lazy" />)}</div> : null}
-
-        <div className="detail-grid">
-          <article className="detail-card" data-reveal>
-            <p className="eyebrow">WILDLIFE & PLACES</p>
-            <h2>Where this safari belongs</h2>
-            <div className="detail-tag-group">
-              {(safari.parks ?? []).map((park) => <span key={park}>{park}</span>)}
-              {(safari.wildlife ?? []).map((animal) => <span key={animal}>{animal}</span>)}
-            </div>
-          </article>
-          {relatedDestinations.length > 0 ? <article className="detail-card" data-reveal><p className="eyebrow">RELATED DESTINATIONS</p><h2>Continue through the landscape</h2><div className="detail-related-list">{relatedDestinations.map((destination) => <button key={destination.slug || destination.name} className="detail-related-item" onClick={() => openDestination(destination)}><span>{destination.country}</span><strong>{destination.name}</strong><ArrowRight size={16} /></button>)}</div></article> : null}
-        </div>
-
-        {relatedSafaris.length > 0 ? <section className="detail-related section-pad"><SectionHeading number="02" eyebrow="MORE JOURNEYS" title="Safaris shaped by the same wild rhythm." /><div className="detail-related-cards">{relatedSafaris.map((item) => <article key={item.slug || item.id} className="detail-related-card" data-reveal><img src={item.image} alt="" loading="lazy" /><div><span>{item.region}</span><h3>{item.title}</h3><button className="text-link" onClick={() => openSafari(item)}>Open safari <ArrowRight size={16} /></button></div></article>)}</div></section> : null}
+        {relatedSafaris.length > 0 ? <section className="detail-related"><SectionHeading number="02" eyebrow="MORE JOURNEYS" title="Safaris shaped by the same wild rhythm." /><div className="detail-related-cards">{relatedSafaris.map((item) => <article key={item.slug || item.id} className="detail-related-card" data-reveal><img src={item.image} alt="" loading="lazy" /><div><span>{item.region}</span><h3>{item.title}</h3><button className="text-link" onClick={() => openSafari(item)}>Open safari <ArrowRight size={16} /></button></div></article>)}</div></section> : null}
       </section>
     </>
   );
@@ -781,8 +930,8 @@ function DestinationDetailPage({ slug, onBack, openSafari }: { slug: string; onB
   return (
     <>
       <section className="detail-hero">
-        <img src={destination.image} alt={`${destination.name} hero`} className="detail-hero-image" />
-        <div className="page-hero-wash" />
+        <img src={destination.image} alt={`${destination.name} hero`} className="detail-hero-image" fetchPriority="high" />
+        <div className="detail-hero-wash" />
         <div className="detail-hero-copy">
           <button className="text-link detail-back" onClick={onBack}><ArrowLeft size={15} /> All destinations</button>
           <p className="eyebrow">{destination.country}</p>
@@ -792,17 +941,19 @@ function DestinationDetailPage({ slug, onBack, openSafari }: { slug: string; onB
         </div>
       </section>
 
-      <section className="detail-shell section-pad">
-        <div className="detail-grid">
-          <article className="detail-card" data-reveal>
-            <p className="eyebrow">AT A GLANCE</p>
-            <h2>Why travellers come here</h2>
-            <p>{destination.description}</p>
-            {destination.activities && destination.activities.length > 0 ? <ul className="detail-list">{destination.activities.map((item) => <li key={item}><Check size={15} />{item}</li>)}</ul> : null}
-          </article>
-          {relatedSafaris.length > 0 ? <article className="detail-card" data-reveal><p className="eyebrow">RELATED SAFARIS</p><h2>Journeys that include {destination.name}</h2><div className="detail-related-list">{relatedSafaris.map((safari) => <button key={safari.slug || safari.id} className="detail-related-item" onClick={() => openSafari(safari)}><span>{safari.duration}</span><strong>{safari.title}</strong><ArrowRight size={16} /></button>)}</div></article> : null}
+      <section className="detail-shell">
+        <div className="detail-shell-inner">
+          <div className="detail-grid">
+            <article className="detail-card" data-reveal>
+              <p className="eyebrow">AT A GLANCE</p>
+              <h2>Why travellers come here</h2>
+              <p className="detail-card-copy">{destination.description}</p>
+              {destination.activities && destination.activities.length > 0 ? <ul className="detail-list">{destination.activities.map((item) => <li key={item}><Check size={15} />{item}</li>)}</ul> : null}
+            </article>
+            {relatedSafaris.length > 0 ? <article className="detail-card" data-reveal><p className="eyebrow">RELATED SAFARIS</p><h2>Journeys that include {destination.name}</h2><div className="detail-related-list">{relatedSafaris.map((safari) => <button key={safari.slug || safari.id} className="detail-related-item" onClick={() => openSafari(safari)}><span>{safari.duration}</span><strong>{safari.title}</strong><ArrowRight size={16} /></button>)}</div></article> : null}
+          </div>
+          {destination.gallery && destination.gallery.length > 0 ? <div className="detail-gallery" data-reveal>{destination.gallery.map((image, index) => <img key={`${image}-${index}`} src={image} alt={`${destination.name} gallery ${index + 1}`} loading="lazy" />)}</div> : null}
         </div>
-        {destination.gallery && destination.gallery.length > 0 ? <div className="detail-gallery" data-reveal>{destination.gallery.map((image, index) => <img key={`${image}-${index}`} src={image} alt={`${destination.name} gallery ${index + 1}`} loading="lazy" />)}</div> : null}
       </section>
     </>
   );
