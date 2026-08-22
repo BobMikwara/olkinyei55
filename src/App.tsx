@@ -700,11 +700,9 @@ function matchesDestination(safari: Safari, destination: Destination) {
     || Boolean(safari.country?.includes(destination.country));
 }
 
-function SafariDetailPage({ slug, onBack, onBook, openDestination, openSafari }: { slug: string; onBack: () => void; onBook: (safari: Safari) => void; openDestination: (destination: Destination) => void; openSafari: (safari: Safari) => void }) {
+function SafariDetailPage({ slug, onBack, onBook, openSafari, navigate }: { slug: string; onBack: () => void; onBook: (safari: Safari) => void; openSafari: (safari: Safari) => void; navigate?: (page: Page) => void }) {
   const safaris = usePublishedSafaris();
-  const destinationList = useDestinations();
   const safari = safaris.find((item) => (item.slug || item.id) === slug);
-  const relatedDestinations = useMemo(() => destinationList.filter((destination) => safari ? matchesDestination(safari, destination) : false), [destinationList, safari]);
   const relatedSafaris = useMemo(() => safaris.filter((item) => (item.slug || item.id) !== slug).slice(0, 3), [safaris, slug]);
 
   useEffect(() => { window.scrollTo({ top: 0, behavior: "instant" }); }, [slug]);
@@ -713,57 +711,242 @@ function SafariDetailPage({ slug, onBack, onBook, openDestination, openSafari }:
     return <section className="journal-page section-pad"><div className="journal-empty" data-reveal><p className="eyebrow">SAFARI NOT FOUND</p><h3>This safari is not available right now.</h3><p>The record may have been unpublished, the slug may have changed, or the public query is not reaching the published package yet.</p><button className="text-link" onClick={onBack}>Back to all safaris <ArrowRight size={16} /></button></div></section>;
   }
 
+  const heroImage = safari.image;
+  const galleryImages = safari.gallery && safari.gallery.length > 0 ? safari.gallery : [safari.image];
+  const highlights = safari.highlights && safari.highlights.length > 0 ? safari.highlights : safari.signature ? [safari.signature] : [];
+  const includedItems = safari.included || [];
+  const excludedItems = safari.excluded || [];
+
   return (
     <>
-      <section className="detail-hero">
-        <img src={safari.image} alt={`${safari.title} hero`} className="detail-hero-image" />
-        <div className="page-hero-wash" />
-        <div className="detail-hero-copy">
-          <button className="text-link detail-back" onClick={onBack}><ArrowLeft size={15} /> All safaris</button>
+      {/* 1. FULL-WIDTH HERO IMAGE */}
+      <section className="safari-detail-hero" aria-label={`${safari.title} hero`}>
+        <img src={heroImage} alt={`${safari.title} in ${safari.region}`} className="safari-detail-hero-image" />
+        <div className="safari-detail-hero-gradient" aria-hidden="true" />
+        <div className="safari-detail-hero-top">
+          <button className="text-link text-link--light safari-detail-back" onClick={onBack} aria-label="Back to all safaris"><ArrowLeft size={15} /> All safaris</button>
+        </div>
+      </section>
+
+      {/* 2. EDITORIAL PACKAGE INTRO */}
+      <section className="safari-intro section-pad" aria-label="Package introduction">
+        <div className="safari-intro-inner">
           <p className="eyebrow">{safari.region}</p>
-          <h1 className="split-reveal">{safari.title}</h1>
-          <p>{safari.description || safari.summary}</p>
-          <div className="detail-meta"><span><Clock3 size={15} />{safari.duration}</span><span><CircleDollarSign size={15} />From {formatCurrency(safari.price)} per person</span><span><CalendarDays size={15} />{safari.availability.join(" / ") || "Year-round"}</span></div>
-          <div className="detail-cta-row"><MagneticButton className="button button--sand" onClick={() => onBook(safari)}>Book this safari <ArrowRight size={17} /></MagneticButton></div>
+          <h1 className="split-reveal safari-intro-title">{safari.title}</h1>
+          <div className="safari-intro-divider" aria-hidden="true" />
+          <p className="safari-intro-desc">{safari.description || safari.summary}</p>
+          <p className="safari-intro-summary">{safari.summary}</p>
         </div>
       </section>
 
-      <section className="detail-shell section-pad">
-        <div className="detail-grid">
-          <article className="detail-card" data-reveal>
-            <p className="eyebrow">OVERVIEW</p>
-            <h2>Journey highlights</h2>
-            <p>{safari.summary}</p>
-            {safari.highlights && safari.highlights.length > 0 ? <ul className="detail-list">{safari.highlights.map((item) => <li key={item}><Check size={15} />{item}</li>)}</ul> : null}
-          </article>
-          <article className="detail-card" data-reveal>
-            <p className="eyebrow">WHAT'S INCLUDED</p>
-            <h2>Travel with clarity</h2>
-            <div className="detail-columns">
-              <div><h3>Included</h3><ul className="detail-list">{safari.included.map((item) => <li key={item}><Check size={15} />{item}</li>)}</ul></div>
-              <div><h3>Not included</h3><ul className="detail-list">{safari.excluded.map((item) => <li key={item}><Minus size={15} />{item}</li>)}</ul></div>
+      {/* 3. REFINED METADATA ROW */}
+      <section className="safari-meta section-pad" aria-label="Journey details">
+        <div className="safari-meta-inner">
+          {(safari.duration || safari.nights) && (
+            <div className="meta-item">
+              <span className="meta-label"><Clock3 size={14} aria-hidden="true" /> Duration</span>
+              <span className="meta-value">{safari.duration || `${safari.nights} nights`}</span>
             </div>
-          </article>
-        </div>
-
-        {safari.gallery.length > 0 ? <div className="detail-gallery" data-reveal>{safari.gallery.map((image, index) => <img key={`${image}-${index}`} src={image} alt={`${safari.title} gallery ${index + 1}`} loading="lazy" />)}</div> : null}
-
-        <div className="detail-grid">
-          <article className="detail-card" data-reveal>
-            <p className="eyebrow">WILDLIFE & PLACES</p>
-            <h2>Where this safari belongs</h2>
-            <div className="detail-tag-group">
-              {(safari.parks ?? []).map((park) => <span key={park}>{park}</span>)}
-              {(safari.wildlife ?? []).map((animal) => <span key={animal}>{animal}</span>)}
+          )}
+          {safari.price > 0 && (
+            <div className="meta-item">
+              <span className="meta-label"><CircleDollarSign size={14} aria-hidden="true" /> Price</span>
+              <span className="meta-value">From {formatCurrency(safari.price)} per person</span>
             </div>
-          </article>
-          {relatedDestinations.length > 0 ? <article className="detail-card" data-reveal><p className="eyebrow">RELATED DESTINATIONS</p><h2>Continue through the landscape</h2><div className="detail-related-list">{relatedDestinations.map((destination) => <button key={destination.slug || destination.name} className="detail-related-item" onClick={() => openDestination(destination)}><span>{destination.country}</span><strong>{destination.name}</strong><ArrowRight size={16} /></button>)}</div></article> : null}
+          )}
+          {(safari.availability && safari.availability.length > 0) && (
+            <div className="meta-item">
+              <span className="meta-label"><CalendarDays size={14} aria-hidden="true" /> Season</span>
+              <span className="meta-value">{safari.availability.join(" / ")}</span>
+            </div>
+          )}
+          {(safari.region || safari.country) && (
+            <div className="meta-item">
+              <span className="meta-label"><Compass size={14} aria-hidden="true" /> Region</span>
+              <span className="meta-value">{safari.region}{safari.country ? ` · ${safari.country.join(", ")}` : ""}</span>
+            </div>
+          )}
         </div>
-
-        {relatedSafaris.length > 0 ? <section className="detail-related section-pad"><SectionHeading number="02" eyebrow="MORE JOURNEYS" title="Safaris shaped by the same wild rhythm." /><div className="detail-related-cards">{relatedSafaris.map((item) => <article key={item.slug || item.id} className="detail-related-card" data-reveal><img src={item.image} alt="" loading="lazy" /><div><span>{item.region}</span><h3>{item.title}</h3><button className="text-link" onClick={() => openSafari(item)}>Open safari <ArrowRight size={16} /></button></div></article>)}</div></section> : null}
       </section>
+
+      {/* 4. GALLERY — ONLY IMAGES BELONGING TO THIS PACKAGE */}
+      {galleryImages.length > 1 && (
+        <section className="safari-gallery section-pad" aria-label="Journey gallery">
+          <div className="safari-gallery-inner">
+            <h2 className="gallery-eyebrow">GALLERY</h2>
+            <div className="gallery-grid-editorial">
+              {galleryImages.map((img, index) => (
+                <button
+                  key={`${img}-${index}`}
+                  className={`gallery-item ${index === 0 ? "gallery-item--featured" : ""}`}
+                  onClick={() => openLightbox(index, galleryImages)}
+                  aria-label={`View gallery image ${index + 1}: ${safari.title}`}
+                >
+                  <img src={img} alt={`${safari.title} gallery ${index + 1}`} loading={index < 2 ? "eager" : "lazy"} />
+                </button>
+              ))}
+            </div>
+          </div>
+        </section>
+      )}
+      {galleryImages.length === 1 && (
+        <section className="safari-gallery-single section-pad" aria-label="Journey gallery">
+          <div className="gallery-single-large">
+            <img src={galleryImages[0]} alt={`${safari.title} gallery`} loading="lazy" />
+          </div>
+        </section>
+      )}
+
+      {/* 5. SIGNATURE MOMENTS / HIGHLIGHTS */}
+      {(highlights.length > 0 || safari.signature) && (
+        <section className="signature-moments section-pad" aria-label="Signature moments">
+          <div className="signature-moments-inner">
+            <div className="signature-moments-copy">
+              <p className="eyebrow">SIGNATURE MOMENTS</p>
+              <h2>What defines this journey</h2>
+              <p className="signature-summary">{safari.signature || safari.summary}</p>
+              <ul className="signature-list">
+                {highlights.map((item, i) => (
+                  <li key={i}><span className="signature-bullet" aria-hidden="true">—</span> {item}</li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        </section>
+      )}
+
+      {/* 6. INCLUDED / NOT INCLUDED */}
+      <section className="included-excluded section-pad" aria-label="Inclusions and exclusions">
+        <div className="included-excluded-inner">
+          <div className="included-col">
+            <h3>Included</h3>
+            <ul className="included-list">
+              {(includedItems.length > 0 ? includedItems : []).map((item, i) => (
+                <li key={i}><Check size={14} aria-hidden="true" /> {item}</li>
+              ))}
+            </ul>
+          </div>
+          <div className="excluded-col">
+            <h3>Not included</h3>
+            <ul className="excluded-list">
+              {(excludedItems.length > 0 ? excludedItems : []).map((item, i) => (
+                <li key={i}><Minus size={14} aria-hidden="true" /> {item}</li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      {/* 7. BOOKING CTA */}
+      <section className="safari-cta section-pad" aria-label="Book this journey">
+        <div className="safari-cta-inner">
+          <h2>Begin this journey</h2>
+          <p>A private safari designer will respond within one business day with a thoughtful first proposal.</p>
+          <MagneticButton className="button button--sand" onClick={() => onBook(safari)} aria-label={`Book ${safari.title}`}>Book this safari <ArrowRight size={17} /></MagneticButton>
+        </div>
+      </section>
+
+      {/* 8. MORE JOURNEYS — OTHER VALID PACKAGES ONLY */}
+      {relatedSafaris.length > 0 && (
+        <section className="more-journeys section-pad" aria-label="More journeys">
+          <SectionHeading eyebrow="MORE JOURNEYS" title="Safaris shaped by the same wild rhythm." />
+          <div className="more-journeys-grid">
+            {relatedSafaris.map((item) => (
+              <a key={item.slug || item.id} href={safariPath(item.slug || item.id)} className="more-journey-card" onClick={(e) => { e.preventDefault(); openSafari(item); }} aria-label={`View ${item.title}`}>
+                <div className="more-journey-image">
+                  <img src={item.image} alt={`${item.title} in ${item.region}`} loading="lazy" />
+                </div>
+                <div className="more-journey-info">
+                  <span className="more-journey-region">{item.region}</span>
+                  <h3>{item.title}</h3>
+                  <p>{item.duration}</p>
+                  <span className="more-journey-link">View details <ArrowRight size={14} /></span>
+                </div>
+              </a>
+            ))}
+          </div>
+        </section>
+      )}
+
+      <Footer navigate={(p) => navigate ? navigate(p) : (p === "experiences" ? onBack() : undefined)} />
     </>
   );
+}
+
+// Lightbox helper — opens a polished overlay for gallery images
+function openLightbox(startIndex: number, images: string[]) {
+  const existing = document.getElementById("gallery-lightbox");
+  if (existing) existing.remove();
+
+  let current = startIndex;
+  const overlay = document.createElement("div");
+  overlay.id = "gallery-lightbox";
+  overlay.className = "gallery-lightbox";
+  overlay.setAttribute("role", "dialog");
+  overlay.setAttribute("aria-modal", "true");
+  overlay.setAttribute("aria-label", "Gallery lightbox");
+
+  const img = document.createElement("img");
+  img.src = images[current];
+  img.alt = `Gallery image ${current + 1}`;
+
+  const closeBtn = document.createElement("button");
+  closeBtn.innerHTML = "<span aria-hidden='true'>&times;</span>";
+  closeBtn.className = "gallery-lightbox-close";
+  closeBtn.setAttribute("aria-label", "Close lightbox");
+  closeBtn.onclick = () => overlay.remove();
+
+  const prevBtn = document.createElement("button");
+  prevBtn.innerHTML = "&#10094;";
+  prevBtn.className = "gallery-lightbox-nav gallery-lightbox-prev";
+  prevBtn.setAttribute("aria-label", "Previous image");
+  prevBtn.onclick = () => {
+    current = (current - 1 + images.length) % images.length;
+    img.src = images[current];
+    img.alt = `Gallery image ${current + 1}`;
+  };
+
+  const nextBtn = document.createElement("button");
+  nextBtn.innerHTML = "&#10095;";
+  nextBtn.className = "gallery-lightbox-nav gallery-lightbox-next";
+  nextBtn.setAttribute("aria-label", "Next image");
+  nextBtn.onclick = () => {
+    current = (current + 1) % images.length;
+    img.src = images[current];
+    img.alt = `Gallery image ${current + 1}`;
+  };
+
+  const caption = document.createElement("p");
+  caption.className = "gallery-lightbox-caption";
+  caption.textContent = `${current + 1} / ${images.length}`;
+
+  overlay.appendChild(closeBtn);
+  overlay.appendChild(prevBtn);
+  overlay.appendChild(img);
+  overlay.appendChild(nextBtn);
+  overlay.appendChild(caption);
+
+  const handleKey = (e: KeyboardEvent) => {
+    if (e.key === "Escape") overlay.remove();
+    if (e.key === "ArrowLeft") prevBtn.click();
+    if (e.key === "ArrowRight") nextBtn.click();
+  };
+  overlay.addEventListener("keydown", handleKey);
+  document.body.appendChild(overlay);
+  document.body.style.overflow = "hidden";
+  overlay.focus();
+
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay) overlay.remove();
+  });
+
+  const observer = new MutationObserver(() => {
+    if (!document.body.contains(overlay)) {
+      document.body.style.overflow = "";
+      observer.disconnect();
+    }
+  });
+  observer.observe(document.body, { childList: true });
 }
 
 function DestinationDetailPage({ slug, onBack, openSafari }: { slug: string; onBack: () => void; openSafari: (safari: Safari) => void }) {
@@ -1493,7 +1676,7 @@ function PublicApp() {
   const pageContent = useMemo(() => {
     if (page === "home") return <HomePage navigate={navigate} content={publicContent} openSafari={openSafari} onOpenPost={openPost} />;
     if (page === "about") return <AboutPage navigate={navigate} />;
-    if (page === "experiences" && safariSlug) return <SafariDetailPage slug={safariSlug} onBack={closeSafari} onBook={bookSafari} openDestination={openDestination} openSafari={openSafari} />;
+    if (page === "experiences" && safariSlug) return <SafariDetailPage slug={safariSlug} onBack={closeSafari} onBook={bookSafari} openDestination={openDestination} openSafari={openSafari} navigate={navigate} />;
     if (page === "experiences") return <ExperiencesPage openSafari={openSafari} onBook={bookSafari} />;
     if (page === "destinations" && destinationSlug) return <DestinationDetailPage slug={destinationSlug} onBack={closeDestination} openSafari={openSafari} />;
     if (page === "destinations") return <DestinationsPage onBook={bookSafari} openDestination={openDestination} />;
