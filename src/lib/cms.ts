@@ -24,6 +24,37 @@ function logError(operation: string, table: string, error: unknown, id?: string)
   console.error(`[CMS] ${operation} failed — table=${table}${id ? ` id=${id}` : ""}: ${msg}`);
 }
 
+// Public-read diagnostics are visible in development, on localhost, on the
+// Arena preview host, and on every Vercel deployment hostname — the places
+// where a broken public read must be diagnosable from the browser console.
+function shouldLogPublicDiagnostics(): boolean {
+  if (typeof window === "undefined") return import.meta.env.DEV;
+  const host = window.location.hostname.toLowerCase();
+  return import.meta.env.DEV
+    || host === "localhost"
+    || host === "127.0.0.1"
+    || host.endsWith(".vercel.app")
+    || host.endsWith(".e2b.app")
+    || host.includes("preview");
+}
+
+function logPublicRead(label: string, details: Record<string, unknown>) {
+  if (!shouldLogPublicDiagnostics()) return;
+  console.log(`[PUBLIC ${label}]`, details);
+}
+
+function logPublicError(label: string, error: unknown, details: Record<string, unknown> = {}) {
+  if (!shouldLogPublicDiagnostics()) return;
+  const message = error instanceof Error ? error.message : String(error);
+  console.error(`[PUBLIC ${label}] Query failed: ${message}`, details);
+}
+
+function isMissingColumnError(message: string): boolean {
+  return /could not find the '[^']+' column/i.test(message)
+    || /schema cache/i.test(message)
+    || /column .+ does not exist/i.test(message);
+}
+
 // ---------------------------------------------------------------------------
 // Site settings (cms_content id=site_settings)
 // ---------------------------------------------------------------------------
@@ -72,22 +103,81 @@ export async function updatePages(content: unknown) {
 // Packages (public.packages)
 // ---------------------------------------------------------------------------
 
-export async function getPackages(publishedOnly = true) {
+export async function getPackages(publishedOnly = true): Promise<Record<string, unknown>[]> {
   const client = publishedOnly ? (supabasePublic ?? supabase) : supabase;
   if (!client) throw new Error("Cloud not configured");
-  let q = client.from("packages").select("*").order("created_at", { ascending: false });
-  if (publishedOnly) q = q.eq("published", true);
-  const { data, error } = await q;
-  if (error) { logError("getPackages", "packages", error); throw error; }
-  return data ?? [];
+  const table = "packages";
+  const filter = publishedOnly ? "published = true" : "all rows";
+  logPublicRead("SAFARIS", { phase: "request-started", table, filter });
+  try {
+    let base = client.from(table).select("*");
+    if (publishedOnly) base = base.eq("published", true);
+    let { data, error } = await base.order("created_at", { ascending: false });
+    if (error && isMissingColumnError((error as { message: string }).message)) {
+      ({ data, error } = await base.order("updated_at", { ascending: false }));
+    }
+    if (error) throw error;
+    const rows = (data as Record<string, unknown>[]) ?? [];
+    logPublicRead("SAFARIS", {
+      phase: "request-succeeded",
+      table,
+      query: `select * where ${filter} order by created_at/updated_at desc`,
+      filter,
+      recordCount: rows.length,
+      packages: rows.slice(0, 25).map((row) => ({
+        id: (row as { id?: string }).id,
+        slug: (row as { slug?: string }).slug,
+        title: (row as { title?: string }).title,
+      })),
+    });
+    return rows;
+  } catch (error) {
+    logPublicError("SAFARIS", error, { table, filter, hint: "Run supabase/public_read_restore.sql, then confirm anon SELECT is permitted on public.packages." });
+    throw error;
+  }
 }
 
-export async function getPackageBySlug(slug: string) {
+/**
+ * Loads ONE package by its canonical database slug through the anonymous
+ * client — the details page follows URL slug → Supabase query → matching
+ * package → render. Returns `null` when no published package matches the
+ * slug; throws only on a genuine read failure (RLS/network/config), which
+ * the caller must surface instead of hiding behind a generic empty state.
+ */
+export async function getPackageBySlug(slug: string): Promise<Record<string, unknown> | null> {
   const client = supabasePublic ?? supabase;
   if (!client) throw new Error("Cloud not configured");
-  const { data, error } = await client.from("packages").select("*").eq("slug", slug).single();
-  if (error) { logError("getPackageBySlug", "packages", error, slug); throw error; }
-  return data;
+  const table = "packages";
+  logPublicRead("SAFARI DETAILS", { phase: "request-started", table, slug, query: `select * where slug = ${slug} and published = true` });
+  try {
+    const { data, error } = await client
+      .from(table)
+      .select("*")
+      .eq("slug", slug)
+      .eq("published", true)
+      .maybeSingle();
+    // PostgREST signals "no row matched" for a single-object request as
+    // HTTP 406 with an empty body (postgrest-js surfaces that as an error
+    // with an empty message / code PGRST116). That is a clean not-found —
+    // only genuine read failures (RLS denial, network, misconfiguration)
+    // are thrown so the caller can surface them.
+    if (error && !(error.code === "PGRST116" || error.message === "" || /multiple \(or no\) rows/i.test(error.message))) {
+      throw error;
+    }
+    logPublicRead("SAFARI DETAILS", {
+      phase: "request-succeeded",
+      table,
+      slug,
+      recordCount: data ? 1 : 0,
+      package: data
+        ? { id: (data as { id?: string }).id, slug: (data as { slug?: string }).slug, title: (data as { title?: string }).title }
+        : null,
+    });
+    return (data as Record<string, unknown> | null) ?? null;
+  } catch (error) {
+    logPublicError("SAFARI DETAILS", error, { table, slug, hint: "Run supabase/public_read_restore.sql, then confirm anon SELECT is permitted on public.packages." });
+    throw error;
+  }
 }
 
 export async function createPackage(payload: Record<string, unknown>) {
